@@ -16,82 +16,82 @@ const FEATURE_INDICES: Record<string, number[]> = {
 
 const NOSE_LANDMARKS = [1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429];
 
+// Superior Zygomatic Body & Apex Focus (Higher up on cheekbones)
 const CHEEK_LANDMARKS = {
-  left: [116, 123, 147, 187, 207, 205, 36, 142, 100, 117, 118, 101, 203, 206, 212, 214, 192, 213],
-  right: [345, 352, 376, 411, 427, 425, 266, 371, 329, 346, 347, 330, 423, 426, 432, 434, 416, 433],
+  left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 36, 142, 100],
+  right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 266, 371, 329],
 };
 
-// MediaPipe Chin / Mentum Mesh Zone
 const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 18, 132, 58, 172, 136, 150, 149, 176, 148, 152];
 
 const NOSE_TECHNIQUES = {
   straight_slim: {
     name: "Straight & Slim Refinement",
-    prompt_suffix: "flawless narrow straight nasal bridge, refined delicate tip, perfectly smooth skin, natural lighting, photorealistic",
-    strength: 0.48,
-    pinchRadiusRatio: 0.28,
-    pinchAmount: 0.22,
+    prompt_suffix: "flawless narrow straight nasal bridge, delicate supratip break, refined defined nasal tip cartilage, subtle alar narrowing, seamless skin texture, photorealistic, 8k resolution",
+    strength: 0.52,
+    pinchRadiusRatio: 0.32,
+    pinchAmount: 0.28,
   },
   dorsal_hump: {
     name: "Dorsal Hump Reduction",
-    prompt_suffix: "straight smooth nasal profile, removal of dorsal hump, photorealistic",
-    strength: 0.45,
-    pinchRadiusRatio: 0.22,
-    pinchAmount: 0.15,
+    prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
+    strength: 0.48,
+    pinchRadiusRatio: 0.25,
+    pinchAmount: 0.20,
   },
   tip_plasty: {
     name: "Nasal Tip Refinement",
-    prompt_suffix: "refined narrow tip cartilage, subtle supratip break, photorealistic",
-    strength: 0.42,
-    pinchRadiusRatio: 0.20,
-    pinchAmount: 0.18,
+    prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
+    strength: 0.45,
+    pinchRadiusRatio: 0.22,
+    pinchAmount: 0.22,
   },
   alar_reduction: {
     name: "Alar Base Narrowing",
-    prompt_suffix: "narrowed alar base, reduced nostril flare, photorealistic",
-    strength: 0.40,
-    pinchRadiusRatio: 0.18,
-    pinchAmount: 0.16,
+    prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
+    strength: 0.42,
+    pinchRadiusRatio: 0.20,
+    pinchAmount: 0.20,
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
-    prompt_suffix: "non-surgical dermal filler alignment, disguised bump, photorealistic",
-    strength: 0.38,
-    pinchRadiusRatio: 0.15,
-    pinchAmount: 0.10,
+    prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
+    strength: 0.40,
+    pinchRadiusRatio: 0.18,
+    pinchAmount: 0.12,
   },
 };
 
 const CHEEK_TECHNIQUES = {
   malar_volume: {
     name: "Malar High-Cheek Enhancement",
-    prompt_suffix: "dramatic cheek filler, high prominent malar cheekbone highlight, bright studio cheek reflection, defined zygomatic arch, lifted midface, photorealistic",
-    strength: 0.68,
-    blurPx: 14,
+    prompt_suffix: "subtle high cheekbone highlight on superior zygomatic arch, elevated midface projection, clean radiant skin, photorealistic",
+    strength: 0.38,
+    blurPx: 6,
   },
   apple_volume: {
     name: "Youthful Apple Volume Fill",
-    prompt_suffix: "plump voluminous anterior cheek apple, rounded youthful medial cheek highlight, smooth tear trough, refreshed midface projection, photorealistic",
-    strength: 0.65,
-    blurPx: 16,
+    prompt_suffix: "subtle youthful malar volume fill concentrated strictly on superior zygomatic body and high cheek apex, light anterior projection beneath infraorbital rim, smooth tear trough transition, photorealistic",
+    strength: 0.36,
+    blurPx: 6,
   },
   contour_sculpt: {
     name: "Sculpted Cheekbone Contour",
-    prompt_suffix: "deeply sculpted chiseled cheekbones, sharp submalar shadow underneath zygomatic arch, dramatic cheek contouring makeup effect, photorealistic",
-    strength: 0.70,
-    blurPx: 12,
+    prompt_suffix: "sculpted high zygomatic arch, refined cheekbone definition, gentle submalar shadow, photorealistic",
+    strength: 0.40,
+    blurPx: 6,
   },
   buccal_fat: {
     name: "Buccal Fat Pad Slimming",
-    prompt_suffix: "dramatic buccal hollow slimming, hollow cheekbones, chiseled submalar reduction, tight jawline transition, photorealistic",
-    strength: 0.72,
-    blurPx: 12,
+    prompt_suffix: "subtle buccal fat pad slimming, refined lower cheek transition, taut jawline, photorealistic",
+    strength: 0.40,
+    blurPx: 8,
   },
   midface_lift: {
     name: "Non-Surgical Midface Vector Lift",
-    prompt_suffix: "elevated high cheek vector, lifted zygomatic tissue, softened nasolabial folds, taut youthful cheek position, photorealistic",
-    strength: 0.66,
-    blurPx: 14,
+    prompt_suffix: "elevated high malar vector, lifted cheek tissue, softened nasolabial transition, taut youthful cheek position, photorealistic",
+    strength: 0.38,
+    blurPx: 6,
   },
 };
 
@@ -99,31 +99,31 @@ const CHIN_TECHNIQUES = {
   anterior_projection: {
     name: "Anterior Projection (Mentoplasty)",
     prompt_suffix: "strong forward chin projection, prominent pogonion, well-defined chin tip, balanced facial profile line, photorealistic",
-    strength: 0.65,
-    blurPx: 14,
+    strength: 0.55,
+    blurPx: 12,
   },
   chin_lengthening: {
     name: "Vertical Chin Elongation",
     prompt_suffix: "elongated lower facial third, vertically extended chin length, defined lower mentum border, sleek proportion, photorealistic",
-    strength: 0.62,
-    blurPx: 16,
+    strength: 0.52,
+    blurPx: 12,
   },
   v_shape_slimming: {
     name: "V-Line Slimming / T-Osteotomy",
     prompt_suffix: "slim V-line chin tip, narrowed mental apex, delicate tapered lower jawline, sleek chin contour, photorealistic",
-    strength: 0.68,
+    strength: 0.55,
     blurPx: 12,
   },
   square_jaw_chin: {
     name: "Broad Square Chin",
     prompt_suffix: "broad masculine square chin, strong angular mental width, wide chiseled chin border, photorealistic",
-    strength: 0.66,
-    blurPx: 14,
+    strength: 0.55,
+    blurPx: 12,
   },
   cleft_smoothing: {
     name: "Chin Dimple / Cleft Smoothing",
     prompt_suffix: "smooth polished chin skin, completely filled chin dimple cleft, relaxed mentalis muscle, seamless chin contour, photorealistic",
-    strength: 0.60,
+    strength: 0.50,
     blurPx: 10,
   },
 };
@@ -154,6 +154,8 @@ const LIP_TECHNIQUES = {
   },
 };
 
+type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip";
+
 const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
   "0.25ml": { strength: 0.35, dilationPx: 4 },
   "0.50ml": { strength: 0.45, dilationPx: 8 },
@@ -171,23 +173,23 @@ const BROW_THICKNESS_MAP: Record<string, { stroke: number; padding: number }> = 
 };
 
 export default function VisualizerApp() {
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
 
-  const [selectedFeatures, setSelectedFeatures] = useState<Array<"chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip">>(["chin"]);
+  const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["nose"]);
 
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
   const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
-  const [browDensity, setBrowDensity] = useState<string>("tint_medium");
+  const [browDensity] = useState<string>("tint_medium");
 
   const [lipTechnique, setLipTechnique] = useState<keyof typeof LIP_TECHNIQUES>("russian");
   const [lipDosage, setLipDosage] = useState<string>("0.50ml");
 
   const [noseTechnique, setNoseTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("straight_slim");
-  const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
+  const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("apple_volume");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
 
-  const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(true);
+  // DRAGGABLE GRID TOGGLE: DEFAULT SET TO FALSE (OFF)
+  const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
 
   const [linePositions, setLinePositions] = useState<{
@@ -237,15 +239,14 @@ export default function VisualizerApp() {
           numFaces: 1,
         });
         setLandmarker(faceLandmarker);
-      } catch (err) {
-        console.error(err);
+      } catch {
         setErrorMessage("Failed to load facial recognition engine.");
       }
     }
     initMediaPipe();
   }, []);
 
-  const toggleFeature = (feat: "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip") => {
+  const toggleFeature = (feat: FeatureType) => {
     if (selectedFeatures.includes(feat)) {
       if (selectedFeatures.length > 1) {
         setSelectedFeatures(selectedFeatures.filter((f) => f !== feat));
@@ -332,10 +333,11 @@ export default function VisualizerApp() {
     const cropCanvas = document.createElement("canvas");
     cropCanvas.width = cropW;
     cropCanvas.height = cropH;
-    const cropCtx = cropCanvas.getContext("2d")!;
-    cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
-    setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
+    const cropCtx = cropCanvas.getContext("2d");
+    if (cropCtx) {
+      cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
+    }
     recalculateMetricsFromLines(initialLines);
   }, [recalculateMetricsFromLines]);
 
@@ -353,7 +355,6 @@ export default function VisualizerApp() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const src = event.target?.result as string;
-      setImageSrc(src);
 
       const img = new Image();
       img.crossOrigin = "anonymous";
@@ -364,7 +365,7 @@ export default function VisualizerApp() {
           const results = landmarker.detect(img);
           if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
             const rawLms = results.faceLandmarks[0];
-            const pixelLms = rawLms.map((pt: any) => ({
+            const pixelLms = rawLms.map((pt: { x: number; y: number }) => ({
               x: pt.x * img.width,
               y: pt.y * img.height,
             }));
@@ -374,7 +375,7 @@ export default function VisualizerApp() {
           } else {
             setErrorMessage("No face detected. Upload a front-facing portrait.");
           }
-        } catch (err) {
+        } catch {
           setErrorMessage("Failed to analyze facial geometry.");
         }
       };
@@ -394,10 +395,12 @@ export default function VisualizerApp() {
     const img = new Image();
     img.src = croppedImageSrc;
     img.onload = () => {
-      const canvas = canvasRef.current!;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
       canvas.width = img.width;
       canvas.height = img.height;
-      const ctx = canvas.getContext("2d")!;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -452,7 +455,7 @@ export default function VisualizerApp() {
             ctx.fillStyle = "white";
             ctx.fill();
 
-            ctx.lineWidth = 20;
+            ctx.lineWidth = 16;
             ctx.strokeStyle = "white";
             ctx.lineJoin = "round";
             ctx.stroke();
@@ -461,26 +464,29 @@ export default function VisualizerApp() {
           const config = CHEEK_TECHNIQUES[cheekTechnique];
           ctx.filter = `blur(${config.blurPx}px)`;
 
+          // Shift mask slightly upward to target high zygomatic body
+          const shiftY = -10;
+
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
             ctx.beginPath();
             const startPt = mappedLandmarks[cheekIndices[0]];
             if (!startPt) return;
-            ctx.moveTo(startPt.x, startPt.y);
+            ctx.moveTo(startPt.x, startPt.y + shiftY);
             for (let i = 1; i < cheekIndices.length; i++) {
               const pt = mappedLandmarks[cheekIndices[i]];
-              if (pt) ctx.lineTo(pt.x, pt.y);
+              if (pt) ctx.lineTo(pt.x, pt.y + shiftY);
             }
             ctx.closePath();
             ctx.fillStyle = "white";
             ctx.fill();
 
-            ctx.lineWidth = 24;
+            ctx.lineWidth = 12;
             ctx.strokeStyle = "white";
             ctx.lineJoin = "round";
             ctx.stroke();
           });
         } else if (feat === "nose") {
-          ctx.filter = "blur(12px)";
+          ctx.filter = "blur(10px)";
           const indices = NOSE_LANDMARKS;
 
           if (indices && indices.length > 0) {
@@ -496,7 +502,7 @@ export default function VisualizerApp() {
               ctx.fillStyle = "white";
               ctx.fill();
 
-              ctx.lineWidth = 14;
+              ctx.lineWidth = 12;
               ctx.strokeStyle = "white";
               ctx.lineJoin = "round";
               ctx.stroke();
@@ -550,56 +556,57 @@ export default function VisualizerApp() {
       setMaskDataUrl(canvas.toDataURL("image/png"));
 
       if (overlayCanvasRef.current && linePositions) {
-        const overlayCanvas = overlayCanvasRef.current!;
+        const overlayCanvas = overlayCanvasRef.current;
         overlayCanvas.width = img.width;
         overlayCanvas.height = img.height;
-        const oCtx = overlayCanvas.getContext("2d")!;
-        oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        const oCtx = overlayCanvas.getContext("2d");
+        if (oCtx) {
+          oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-        if (showGoldenRatio) {
-          const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositions;
+          if (showGoldenRatio) {
+            const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositions;
 
-          const lines = [
-            { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
-            { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
-            { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
-            { key: "menton", y: menton, label: "Menton (Chin Tip)" },
-          ];
+            const lines = [
+              { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
+              { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
+              { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
+              { key: "menton", y: menton, label: "Menton (Chin Tip)" },
+            ];
 
-          lines.forEach((line) => {
-            const isDragging = activeDraggingLine === line.key;
+            lines.forEach((line) => {
+              const isDragging = activeDraggingLine === line.key;
 
-            oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
-            oCtx.lineWidth = isDragging ? 3 : 1.5;
+              oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.lineWidth = isDragging ? 3 : 1.5;
 
-            oCtx.beginPath();
-            oCtx.moveTo(leftX - 25, line.y);
-            oCtx.lineTo(rightX + 25, line.y);
-            oCtx.stroke();
+              oCtx.beginPath();
+              oCtx.moveTo(leftX - 25, line.y);
+              oCtx.lineTo(rightX + 25, line.y);
+              oCtx.stroke();
 
-            oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-            oCtx.beginPath();
-            oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
-            oCtx.fill();
+              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.beginPath();
+              oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
+              oCtx.fill();
 
-            oCtx.font = "10px monospace";
-            oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-            oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
-          });
+              oCtx.font = "10px monospace";
+              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
+            });
 
-          oCtx.strokeStyle = "#f59e0b";
-          oCtx.lineWidth = 2;
-          oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
+            oCtx.strokeStyle = "#f59e0b";
+            oCtx.lineWidth = 2;
+            oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
 
-          oCtx.font = "11px monospace";
-          oCtx.fillStyle = "#fbbf24";
-          oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
+            oCtx.font = "11px monospace";
+            oCtx.fillStyle = "#fbbf24";
+            oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
+          }
         }
       }
     };
-  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browTechnique, browThickness, lipTechnique, browDensity, lipDosage, noseTechnique, cheekTechnique, chinTechnique, showGoldenRatio, croppedImageSrc]);
+  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, chinTechnique, showGoldenRatio, croppedImageSrc]);
 
-  // Radial Pinch for Nose
   const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
     if (!croppedImageSrc || !mappedLandmarks) return null;
 
@@ -612,7 +619,8 @@ export default function VisualizerApp() {
     warpCanvas.width = width;
     warpCanvas.height = height;
 
-    const wCtx = warpCanvas.getContext("2d")!;
+    const wCtx = warpCanvas.getContext("2d");
+    if (!wCtx) return croppedImageSrc;
     wCtx.drawImage(img, 0, 0);
 
     const srcData = wCtx.getImageData(0, 0, width, height);
@@ -718,8 +726,8 @@ export default function VisualizerApp() {
     setErrorMessage(null);
 
     try {
-      const promptParts: string[] = ["Clinical aesthetic transformation:"];
-      let maxStrength = 0.48;
+      const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
+      let maxStrength = 0.45;
       let targetImage = croppedImageSrc;
 
       if (selectedFeatures.includes("chin")) {
@@ -758,7 +766,7 @@ export default function VisualizerApp() {
       const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
         input: {
           prompt: compositePrompt,
-          negative_prompt: "receding chin, double chin, weak jawline, asymmetrical chin, distorted face, wide bridge, broad nose, stray hairs, discolored teeth",
+          negative_prompt: "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
           image_url: targetImage,
           mask_url: maskDataUrl,
           strength: maxStrength,
@@ -769,11 +777,11 @@ export default function VisualizerApp() {
       if (result.data?.images?.[0]?.url) {
         setResultImage(result.data.images[0].url);
       } else {
-        setErrorMessage("AI simulation failed. Check Fal API key.");
+        setErrorMessage("AI simulation failed to return an image.");
       }
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err?.message || "Failed to run composite simulation.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
+      setErrorMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -789,7 +797,7 @@ export default function VisualizerApp() {
         <button
           onClick={() => setShowGoldenRatio(!showGoldenRatio)}
           className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
-            showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400"
+            showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
           }`}
         >
           {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
@@ -810,18 +818,18 @@ export default function VisualizerApp() {
           </label>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
             {[
-              { id: "chin", label: "Chin" },
-              { id: "cheeks", label: "Cheeks" },
-              { id: "nose", label: "Rhinoplasty" },
-              { id: "brows", label: "Eyebrows" },
-              { id: "upper_lip", label: "Upper Lip" },
-              { id: "lower_lip", label: "Lower Lip" },
+              { id: "chin" as const, label: "Chin" },
+              { id: "cheeks" as const, label: "Cheeks" },
+              { id: "nose" as const, label: "Rhinoplasty" },
+              { id: "brows" as const, label: "Eyebrows" },
+              { id: "upper_lip" as const, label: "Upper Lip" },
+              { id: "lower_lip" as const, label: "Lower Lip" },
             ].map((f) => {
-              const active = selectedFeatures.includes(f.id as any);
+              const active = selectedFeatures.includes(f.id);
               return (
                 <button
                   key={f.id}
-                  onClick={() => toggleFeature(f.id as any)}
+                  onClick={() => toggleFeature(f.id)}
                   className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition ${
                     active
                       ? "bg-amber-600/20 border-amber-500 text-amber-200 font-bold"
@@ -849,7 +857,7 @@ export default function VisualizerApp() {
               <label className="block text-xs text-amber-300 font-medium mb-1">Chin Procedure Preset</label>
               <select
                 value={chinTechnique}
-                onChange={(e) => setChinTechnique(e.target.value as any)}
+                onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
                 {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
@@ -867,7 +875,7 @@ export default function VisualizerApp() {
               <label className="block text-xs text-amber-300 font-medium mb-1">Cheek Procedure Preset</label>
               <select
                 value={cheekTechnique}
-                onChange={(e) => setCheekTechnique(e.target.value as any)}
+                onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
                 {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
@@ -885,7 +893,7 @@ export default function VisualizerApp() {
               <label className="block text-xs text-amber-300 font-medium mb-1">Rhinoplasty Preset</label>
               <select
                 value={noseTechnique}
-                onChange={(e) => setNoseTechnique(e.target.value as any)}
+                onChange={(e) => setNoseTechnique(e.target.value as keyof typeof NOSE_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
                 {Object.entries(NOSE_TECHNIQUES).map(([key, item]) => (
@@ -904,7 +912,7 @@ export default function VisualizerApp() {
               <div className="flex gap-2">
                 <select
                   value={browTechnique}
-                  onChange={(e) => setBrowTechnique(e.target.value as any)}
+                  onChange={(e) => setBrowTechnique(e.target.value as keyof typeof BROW_TECHNIQUES)}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
                 >
                   <option value="ombre_powder">Ombré Powder</option>
@@ -914,7 +922,7 @@ export default function VisualizerApp() {
 
                 <select
                   value={browThickness}
-                  onChange={(e) => setBrowThickness(e.target.value as any)}
+                  onChange={(e) => setBrowThickness(e.target.value as "thin" | "medium" | "thick")}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
                 >
                   <option value="thin">Thin</option>
@@ -932,7 +940,7 @@ export default function VisualizerApp() {
               <div className="flex gap-2">
                 <select
                   value={lipTechnique}
-                  onChange={(e) => setLipTechnique(e.target.value as any)}
+                  onChange={(e) => setLipTechnique(e.target.value as keyof typeof LIP_TECHNIQUES)}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
                 >
                   <option value="russian">Russian Lift</option>
@@ -1015,12 +1023,14 @@ export default function VisualizerApp() {
           <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
             {resultImage ? (
               <div className="relative w-full aspect-square select-none touch-none">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
 
                 <div
                   className="absolute inset-y-0 left-0 overflow-hidden"
                   style={{ width: `${sliderPos}%` }}
                 >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={croppedImageSrc}
                     alt="Before"
@@ -1056,6 +1066,7 @@ export default function VisualizerApp() {
               </div>
             ) : (
               <div className="relative w-full aspect-square">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-full object-cover pointer-events-none" />
                 <canvas
                   ref={overlayCanvasRef}
