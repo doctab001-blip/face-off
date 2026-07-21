@@ -21,7 +21,6 @@ const CHEEK_LANDMARKS = {
   right: [345, 352, 376, 411, 427, 425, 266, 371, 329, 346, 347, 330, 423, 426, 432, 434, 416, 433],
 };
 
-// MediaPipe Chin / Mentum Mesh Zone
 const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 18, 132, 58, 172, 136, 150, 149, 176, 148, 152];
 
 const NOSE_TECHNIQUES = {
@@ -154,6 +153,8 @@ const LIP_TECHNIQUES = {
   },
 };
 
+type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip";
+
 const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
   "0.25ml": { strength: 0.35, dilationPx: 4 },
   "0.50ml": { strength: 0.45, dilationPx: 8 },
@@ -171,14 +172,13 @@ const BROW_THICKNESS_MAP: Record<string, { stroke: number; padding: number }> = 
 };
 
 export default function VisualizerApp() {
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
 
-  const [selectedFeatures, setSelectedFeatures] = useState<Array<"chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip">>(["chin"]);
+  const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["chin"]);
 
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
   const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
-  const [browDensity, setBrowDensity] = useState<string>("tint_medium");
+  const [browDensity] = useState<string>("tint_medium");
 
   const [lipTechnique, setLipTechnique] = useState<keyof typeof LIP_TECHNIQUES>("russian");
   const [lipDosage, setLipDosage] = useState<string>("0.50ml");
@@ -237,15 +237,14 @@ export default function VisualizerApp() {
           numFaces: 1,
         });
         setLandmarker(faceLandmarker);
-      } catch (err) {
-        console.error(err);
+      } catch {
         setErrorMessage("Failed to load facial recognition engine.");
       }
     }
     initMediaPipe();
   }, []);
 
-  const toggleFeature = (feat: "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip") => {
+  const toggleFeature = (feat: FeatureType) => {
     if (selectedFeatures.includes(feat)) {
       if (selectedFeatures.length > 1) {
         setSelectedFeatures(selectedFeatures.filter((f) => f !== feat));
@@ -332,10 +331,11 @@ export default function VisualizerApp() {
     const cropCanvas = document.createElement("canvas");
     cropCanvas.width = cropW;
     cropCanvas.height = cropH;
-    const cropCtx = cropCanvas.getContext("2d")!;
-    cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
-    setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
+    const cropCtx = cropCanvas.getContext("2d");
+    if (cropCtx) {
+      cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
+    }
     recalculateMetricsFromLines(initialLines);
   }, [recalculateMetricsFromLines]);
 
@@ -353,7 +353,6 @@ export default function VisualizerApp() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const src = event.target?.result as string;
-      setImageSrc(src);
 
       const img = new Image();
       img.crossOrigin = "anonymous";
@@ -364,7 +363,7 @@ export default function VisualizerApp() {
           const results = landmarker.detect(img);
           if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
             const rawLms = results.faceLandmarks[0];
-            const pixelLms = rawLms.map((pt: any) => ({
+            const pixelLms = rawLms.map((pt: { x: number; y: number }) => ({
               x: pt.x * img.width,
               y: pt.y * img.height,
             }));
@@ -374,7 +373,7 @@ export default function VisualizerApp() {
           } else {
             setErrorMessage("No face detected. Upload a front-facing portrait.");
           }
-        } catch (err) {
+        } catch {
           setErrorMessage("Failed to analyze facial geometry.");
         }
       };
@@ -394,10 +393,12 @@ export default function VisualizerApp() {
     const img = new Image();
     img.src = croppedImageSrc;
     img.onload = () => {
-      const canvas = canvasRef.current!;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
       canvas.width = img.width;
       canvas.height = img.height;
-      const ctx = canvas.getContext("2d")!;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -550,56 +551,57 @@ export default function VisualizerApp() {
       setMaskDataUrl(canvas.toDataURL("image/png"));
 
       if (overlayCanvasRef.current && linePositions) {
-        const overlayCanvas = overlayCanvasRef.current!;
+        const overlayCanvas = overlayCanvasRef.current;
         overlayCanvas.width = img.width;
         overlayCanvas.height = img.height;
-        const oCtx = overlayCanvas.getContext("2d")!;
-        oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        const oCtx = overlayCanvas.getContext("2d");
+        if (oCtx) {
+          oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-        if (showGoldenRatio) {
-          const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositions;
+          if (showGoldenRatio) {
+            const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositions;
 
-          const lines = [
-            { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
-            { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
-            { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
-            { key: "menton", y: menton, label: "Menton (Chin Tip)" },
-          ];
+            const lines = [
+              { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
+              { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
+              { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
+              { key: "menton", y: menton, label: "Menton (Chin Tip)" },
+            ];
 
-          lines.forEach((line) => {
-            const isDragging = activeDraggingLine === line.key;
+            lines.forEach((line) => {
+              const isDragging = activeDraggingLine === line.key;
 
-            oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
-            oCtx.lineWidth = isDragging ? 3 : 1.5;
+              oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.lineWidth = isDragging ? 3 : 1.5;
 
-            oCtx.beginPath();
-            oCtx.moveTo(leftX - 25, line.y);
-            oCtx.lineTo(rightX + 25, line.y);
-            oCtx.stroke();
+              oCtx.beginPath();
+              oCtx.moveTo(leftX - 25, line.y);
+              oCtx.lineTo(rightX + 25, line.y);
+              oCtx.stroke();
 
-            oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-            oCtx.beginPath();
-            oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
-            oCtx.fill();
+              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.beginPath();
+              oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
+              oCtx.fill();
 
-            oCtx.font = "10px monospace";
-            oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-            oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
-          });
+              oCtx.font = "10px monospace";
+              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
+            });
 
-          oCtx.strokeStyle = "#f59e0b";
-          oCtx.lineWidth = 2;
-          oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
+            oCtx.strokeStyle = "#f59e0b";
+            oCtx.lineWidth = 2;
+            oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
 
-          oCtx.font = "11px monospace";
-          oCtx.fillStyle = "#fbbf24";
-          oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
+            oCtx.font = "11px monospace";
+            oCtx.fillStyle = "#fbbf24";
+            oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
+          }
         }
       }
     };
-  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browTechnique, browThickness, lipTechnique, browDensity, lipDosage, noseTechnique, cheekTechnique, chinTechnique, showGoldenRatio, croppedImageSrc]);
+  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, chinTechnique, showGoldenRatio, croppedImageSrc]);
 
-  // Radial Pinch for Nose
   const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
     if (!croppedImageSrc || !mappedLandmarks) return null;
 
@@ -612,7 +614,8 @@ export default function VisualizerApp() {
     warpCanvas.width = width;
     warpCanvas.height = height;
 
-    const wCtx = warpCanvas.getContext("2d")!;
+    const wCtx = warpCanvas.getContext("2d");
+    if (!wCtx) return croppedImageSrc;
     wCtx.drawImage(img, 0, 0);
 
     const srcData = wCtx.getImageData(0, 0, width, height);
@@ -771,9 +774,9 @@ export default function VisualizerApp() {
       } else {
         setErrorMessage("AI simulation failed. Check Fal API key.");
       }
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err?.message || "Failed to run composite simulation.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
+      setErrorMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -810,18 +813,18 @@ export default function VisualizerApp() {
           </label>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
             {[
-              { id: "chin", label: "Chin" },
-              { id: "cheeks", label: "Cheeks" },
-              { id: "nose", label: "Rhinoplasty" },
-              { id: "brows", label: "Eyebrows" },
-              { id: "upper_lip", label: "Upper Lip" },
-              { id: "lower_lip", label: "Lower Lip" },
+              { id: "chin" as const, label: "Chin" },
+              { id: "cheeks" as const, label: "Cheeks" },
+              { id: "nose" as const, label: "Rhinoplasty" },
+              { id: "brows" as const, label: "Eyebrows" },
+              { id: "upper_lip" as const, label: "Upper Lip" },
+              { id: "lower_lip" as const, label: "Lower Lip" },
             ].map((f) => {
-              const active = selectedFeatures.includes(f.id as any);
+              const active = selectedFeatures.includes(f.id);
               return (
                 <button
                   key={f.id}
-                  onClick={() => toggleFeature(f.id as any)}
+                  onClick={() => toggleFeature(f.id)}
                   className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition ${
                     active
                       ? "bg-amber-600/20 border-amber-500 text-amber-200 font-bold"
@@ -849,7 +852,7 @@ export default function VisualizerApp() {
               <label className="block text-xs text-amber-300 font-medium mb-1">Chin Procedure Preset</label>
               <select
                 value={chinTechnique}
-                onChange={(e) => setChinTechnique(e.target.value as any)}
+                onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
                 {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
@@ -867,7 +870,7 @@ export default function VisualizerApp() {
               <label className="block text-xs text-amber-300 font-medium mb-1">Cheek Procedure Preset</label>
               <select
                 value={cheekTechnique}
-                onChange={(e) => setCheekTechnique(e.target.value as any)}
+                onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
                 {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
@@ -885,7 +888,7 @@ export default function VisualizerApp() {
               <label className="block text-xs text-amber-300 font-medium mb-1">Rhinoplasty Preset</label>
               <select
                 value={noseTechnique}
-                onChange={(e) => setNoseTechnique(e.target.value as any)}
+                onChange={(e) => setNoseTechnique(e.target.value as keyof typeof NOSE_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
                 {Object.entries(NOSE_TECHNIQUES).map(([key, item]) => (
@@ -904,7 +907,7 @@ export default function VisualizerApp() {
               <div className="flex gap-2">
                 <select
                   value={browTechnique}
-                  onChange={(e) => setBrowTechnique(e.target.value as any)}
+                  onChange={(e) => setBrowTechnique(e.target.value as keyof typeof BROW_TECHNIQUES)}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
                 >
                   <option value="ombre_powder">Ombré Powder</option>
@@ -914,7 +917,7 @@ export default function VisualizerApp() {
 
                 <select
                   value={browThickness}
-                  onChange={(e) => setBrowThickness(e.target.value as any)}
+                  onChange={(e) => setBrowThickness(e.target.value as "thin" | "medium" | "thick")}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
                 >
                   <option value="thin">Thin</option>
@@ -932,7 +935,7 @@ export default function VisualizerApp() {
               <div className="flex gap-2">
                 <select
                   value={lipTechnique}
-                  onChange={(e) => setLipTechnique(e.target.value as any)}
+                  onChange={(e) => setLipTechnique(e.target.value as keyof typeof LIP_TECHNIQUES)}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
                 >
                   <option value="russian">Russian Lift</option>
@@ -1015,12 +1018,14 @@ export default function VisualizerApp() {
           <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
             {resultImage ? (
               <div className="relative w-full aspect-square select-none touch-none">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
 
                 <div
                   className="absolute inset-y-0 left-0 overflow-hidden"
                   style={{ width: `${sliderPos}%` }}
                 >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={croppedImageSrc}
                     alt="Before"
@@ -1056,6 +1061,7 @@ export default function VisualizerApp() {
               </div>
             ) : (
               <div className="relative w-full aspect-square">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-full object-cover pointer-events-none" />
                 <canvas
                   ref={overlayCanvasRef}
