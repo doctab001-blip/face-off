@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
@@ -313,7 +314,7 @@ export default function VisualizerApp() {
     let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
     let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
 
-    // Enforce 64px multiple to prevent PyTorch 422 shape mismatch errors
+    // Enforce 64px multiple to prevent PyTorch tensor mismatch errors
     cropW = Math.max(64, Math.floor(cropW / 64) * 64);
     cropH = Math.max(64, Math.floor(cropH / 64) * 64);
 
@@ -747,25 +748,27 @@ export default function VisualizerApp() {
     });
   }, []);
 
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // UNIFIED POINTER EVENTS FOR IPAD & STYLUS COMPATIBILITY
+  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!showGoldenRatio || !linePositions || !overlayCanvasRef.current) return;
 
     const rect = overlayCanvasRef.current.getBoundingClientRect();
     const scaleY = overlayCanvasRef.current.height / rect.height;
     const clickY = (e.clientY - rect.top) * scaleY;
 
-    const threshold = 14;
+    const threshold = 18; // Slightly larger touch area for iPad finger taps
     const keys: Array<keyof typeof linePositions> = ["trichion", "glabella", "subnasale", "menton"];
 
     for (const key of keys) {
       if (Math.abs(linePositions[key] - clickY) < threshold) {
         setActiveDraggingLine(key);
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
         break;
       }
     }
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!activeDraggingLine || !linePositions || !overlayCanvasRef.current) return;
 
     const rect = overlayCanvasRef.current.getBoundingClientRect();
@@ -781,8 +784,11 @@ export default function VisualizerApp() {
     recalculateMetricsFromLines(updated);
   };
 
-  const handleCanvasMouseUp = () => {
-    setActiveDraggingLine(null);
+  const handleCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activeDraggingLine) {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      setActiveDraggingLine(null);
+    }
   };
 
   const handleGeneratePreview = async () => {
@@ -937,20 +943,55 @@ export default function VisualizerApp() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-6 space-y-6 text-white bg-gray-950 min-h-screen select-none">
-      <div className="border-b border-gray-800 pb-4 flex justify-between items-center">
+    <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 text-white bg-gray-950 min-h-screen select-none touch-pan-y">
+      {/* Header & Facility Auth Bar */}
+      <div className="border-b border-gray-800 pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
-          <p className="text-gray-400 text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
+          <p className="text-gray-400 text-xs md:text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
         </div>
-        <button
-          onClick={() => setShowGoldenRatio(!showGoldenRatio)}
-          className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
-            showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
-          }`}
-        >
-          {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
-        </button>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowGoldenRatio(!showGoldenRatio)}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
+              showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
+            }`}
+          >
+            {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
+          </button>
+
+          {/* Clerk Auth Integration */}
+          <SignedOut>
+            <div className="flex items-center gap-2">
+              <SignInButton mode="modal">
+                <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium">
+                  Facility Sign In
+                </button>
+              </SignInButton>
+
+              <SignUpButton mode="modal">
+                <button className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded font-medium">
+                  Register Facility
+                </button>
+              </SignUpButton>
+            </div>
+          </SignedOut>
+
+          <SignedIn>
+            <div className="flex items-center gap-2">
+              <OrganizationSwitcher
+                appearance={{
+                  elements: {
+                    rootBox: "bg-gray-800 rounded border border-gray-700 text-xs",
+                    organizationSwitcherTrigger: "text-xs text-amber-200 py-1 px-2",
+                  },
+                }}
+              />
+              <UserButton afterSignOutUrl="/" />
+            </div>
+          </SignedIn>
+        </div>
       </div>
 
       {errorMessage && (
@@ -960,7 +1001,7 @@ export default function VisualizerApp() {
       )}
 
       {/* Control Panel */}
-      <div className="bg-gray-900 p-5 rounded-xl border border-gray-800 space-y-4">
+      <div className="bg-gray-900 p-4 md:p-5 rounded-xl border border-gray-800 space-y-4">
         <div>
           <label className="block text-xs font-semibold text-amber-200 uppercase tracking-wider mb-2">
             1. Select Target Procedures
@@ -1191,14 +1232,14 @@ export default function VisualizerApp() {
             )}
           </div>
 
-          <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
+          <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800 touch-none">
             {resultImage ? (
               <div className="relative w-full aspect-square select-none touch-none">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
 
                 <div
-                  className="absolute inset-y-0 left-0 overflow-hidden"
+                  className="absolute inset-y-0 left-0 overflow-hidden pointer-events-none"
                   style={{ width: `${sliderPos}%` }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1216,7 +1257,7 @@ export default function VisualizerApp() {
                   max="100"
                   value={sliderPos}
                   onChange={(e) => setSliderPos(Number(e.target.value))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20 touch-none"
                 />
 
                 <div
@@ -1228,23 +1269,24 @@ export default function VisualizerApp() {
                   </div>
                 </div>
 
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono">
+                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono pointer-events-none">
                   BEFORE
                 </span>
-                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono">
+                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono pointer-events-none">
                   AFTER ({selectedFeatures.join(" + ").toUpperCase()})
                 </span>
               </div>
             ) : (
-              <div className="relative w-full aspect-square">
+              <div className="relative w-full aspect-square touch-none">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-full object-cover pointer-events-none" />
                 <canvas
                   ref={overlayCanvasRef}
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={handleCanvasMouseMove}
-                  onMouseUp={handleCanvasMouseUp}
-                  className="absolute inset-0 w-full h-full cursor-ns-resize"
+                  onPointerDown={handleCanvasPointerDown}
+                  onPointerMove={handleCanvasPointerMove}
+                  onPointerUp={handleCanvasPointerUp}
+                  className="absolute inset-0 w-full h-full cursor-ns-resize touch-none"
+                  style={{ touchAction: "none" }}
                 />
               </div>
             )}
