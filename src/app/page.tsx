@@ -16,10 +16,10 @@ const FEATURE_INDICES: Record<string, number[]> = {
 
 const NOSE_LANDMARKS = [1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429];
 
-// Superior Zygomatic Body & Apex Focus
+// Superior Zygomatic Process & Arch Prominence
 const CHEEK_LANDMARKS = {
-  left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 36, 142, 100],
-  right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 266, 371, 329],
+  left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 227, 111, 36, 142, 100],
+  right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 447, 340, 266, 371, 329],
 };
 
 const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 18, 132, 58, 172, 136, 150, 149, 176, 148, 152];
@@ -64,34 +64,34 @@ const NOSE_TECHNIQUES = {
 
 const CHEEK_TECHNIQUES = {
   malar_volume: {
-    name: "Malar High-Cheek Enhancement",
-    prompt_suffix: "subtle high cheekbone highlight on superior zygomatic arch, elevated midface projection, clean radiant skin, photorealistic",
-    strength: 0.38,
-    blurPx: 6,
+    name: "Zygomatic Arch Projection",
+    prompt_suffix: "defined dermal filler projection over the zygomatic process and arch prominence, elevated high cheekbone apex, smooth transition to infraorbital rim, photorealistic",
   },
   apple_volume: {
-    name: "Youthful Apple Volume Fill",
-    prompt_suffix: "subtle youthful malar volume fill concentrated strictly on superior zygomatic body and high cheek apex, light anterior projection beneath infraorbital rim, smooth tear trough transition, photorealistic",
-    strength: 0.36,
-    blurPx: 6,
+    name: "Anterior Zygomatic Body Fill",
+    prompt_suffix: "youthful dermal filler volume concentrated over anterior zygomatic body prominence, natural midface projection, seamless skin texture, photorealistic",
   },
   contour_sculpt: {
-    name: "Sculpted Cheekbone Contour",
-    prompt_suffix: "sculpted high zygomatic arch, refined cheekbone definition, gentle submalar shadow, photorealistic",
-    strength: 0.40,
-    blurPx: 6,
+    name: "High Zygomatic Arch Sculpting",
+    prompt_suffix: "chiseled lateral zygomatic arch highlight, elevated cheekbone structure, elegant midface contour, photorealistic",
   },
-  buccal_fat: {
-    name: "Buccal Fat Pad Slimming",
-    prompt_suffix: "subtle buccal fat pad slimming, refined lower cheek transition, taut jawline, photorealistic",
-    strength: 0.40,
-    blurPx: 8,
+};
+
+const CHEEK_DOSAGE_MAP: Record<string, { strength: number; dilationPx: number; promptLabel: string }> = {
+  "0.50ml": {
+    strength: 0.32,
+    dilationPx: 8,
+    promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence",
   },
-  midface_lift: {
-    name: "Non-Surgical Midface Vector Lift",
-    prompt_suffix: "elevated high malar vector, lifted cheek tissue, softened nasolabial transition, taut youthful cheek position, photorealistic",
-    strength: 0.38,
-    blurPx: 6,
+  "1.00ml": {
+    strength: 0.40,
+    dilationPx: 14,
+    promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch",
+  },
+  "1.50ml": {
+    strength: 0.48,
+    dilationPx: 20,
+    promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure",
   },
 };
 
@@ -175,7 +175,7 @@ const BROW_THICKNESS_MAP: Record<string, { stroke: number; padding: number }> = 
 export default function VisualizerApp() {
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
 
-  const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["nose"]);
+  const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks"]);
 
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
   const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
@@ -185,10 +185,10 @@ export default function VisualizerApp() {
   const [lipDosage, setLipDosage] = useState<string>("0.50ml");
 
   const [noseTechnique, setNoseTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("straight_slim");
-  const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("apple_volume");
+  const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
+  const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
 
-  // Draggable Grid Toggle: Default set to FALSE (OFF)
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
 
@@ -313,7 +313,7 @@ export default function VisualizerApp() {
     let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
     let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
 
-    // FORCE MULTIPLE OF 64 FOR FLUX TENSOR DIMENSIONS
+    // Enforce 64px multiple to prevent PyTorch 422 shape mismatch errors
     cropW = Math.max(64, Math.floor(cropW / 64) * 64);
     cropH = Math.max(64, Math.floor(cropH / 64) * 64);
 
@@ -473,9 +473,9 @@ export default function VisualizerApp() {
             layerCtx.stroke();
           }
         } else if (feat === "cheeks") {
-          const config = CHEEK_TECHNIQUES[cheekTechnique];
-          layerCtx.filter = `blur(${config.blurPx}px)`;
-          const shiftY = -10;
+          const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+          layerCtx.filter = "blur(8px)";
+          const shiftY = -8;
 
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
             layerCtx.beginPath();
@@ -490,7 +490,7 @@ export default function VisualizerApp() {
             layerCtx.fillStyle = "white";
             layerCtx.fill();
 
-            layerCtx.lineWidth = 10;
+            layerCtx.lineWidth = dosageConfig.dilationPx;
             layerCtx.strokeStyle = "white";
             layerCtx.lineJoin = "round";
             layerCtx.stroke();
@@ -611,7 +611,7 @@ export default function VisualizerApp() {
         }
       }
     };
-  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, chinTechnique, showGoldenRatio, croppedImageSrc]);
+  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc]);
 
   const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
     if (!croppedImageSrc || !mappedLandmarks) return null;
@@ -804,8 +804,9 @@ export default function VisualizerApp() {
 
       if (selectedFeatures.includes("cheeks")) {
         const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
-        promptParts.push(cheekConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, cheekConfig.strength);
+        const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+        promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
+        maxStrength = Math.max(maxStrength, cheekDosageConfig.strength);
       }
 
       if (selectedFeatures.includes("brows")) {
@@ -1019,19 +1020,31 @@ export default function VisualizerApp() {
 
           {/* Cheek Selector */}
           {selectedFeatures.includes("cheeks") && (
-            <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Cheek Procedure Preset</label>
-              <select
-                value={cheekTechnique}
-                onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
-                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
-              >
-                {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
-                  <option key={key} value={key}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-2">
+              <label className="block text-xs text-amber-300 font-medium">Cheek Technique & Volume</label>
+              <div className="flex gap-2">
+                <select
+                  value={cheekTechnique}
+                  onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
+                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs flex-1 font-medium"
+                >
+                  {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
+                    <option key={key} value={key}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={cheekDosage}
+                  onChange={(e) => setCheekDosage(e.target.value)}
+                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-28 font-medium"
+                >
+                  <option value="0.50ml">0.50 mL/side</option>
+                  <option value="1.00ml">1.00 mL/side</option>
+                  <option value="1.50ml">1.50 mL/side</option>
+                </select>
+              </div>
             </div>
           )}
 
