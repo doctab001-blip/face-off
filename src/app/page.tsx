@@ -686,6 +686,70 @@ export default function VisualizerApp() {
     return warpCanvas.toDataURL("image/png");
   }, [croppedImageSrc, mappedLandmarks]);
 
+  // METHOD B: ADAPTIVE ALPHA EDGE-FEATHERING POST-PROCESSOR
+  const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const origImg = new Image();
+      const aiImg = new Image();
+      const maskImg = new Image();
+
+      let loadedCount = 0;
+      const checkLoaded = () => {
+        loadedCount++;
+        if (loadedCount === 3) {
+          const canvas = document.createElement("canvas");
+          const width = origImg.width;
+          const height = origImg.height;
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(aiResultUrl);
+
+          // Step 1: Draw base AI result
+          ctx.drawImage(aiImg, 0, 0, width, height);
+
+          // Step 2: Create soft-edged alpha mask on secondary canvas
+          const alphaCanvas = document.createElement("canvas");
+          alphaCanvas.width = width;
+          alphaCanvas.height = height;
+          const aCtx = alphaCanvas.getContext("2d");
+          if (!aCtx) return resolve(aiResultUrl);
+
+          // Invert mask and apply heavy feather blur (16px)
+          aCtx.filter = "blur(16px)";
+          aCtx.drawImage(maskImg, 0, 0, width, height);
+
+          // Step 3: Draw original image through feathered perimeter to seamless blend edges
+          ctx.save();
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.drawImage(alphaCanvas, 0, 0);
+          ctx.globalCompositeOperation = "destination-over";
+          ctx.drawImage(origImg, 0, 0, width, height);
+          ctx.restore();
+
+          resolve(canvas.toDataURL("image/png"));
+        }
+      };
+
+      origImg.crossOrigin = "anonymous";
+      aiImg.crossOrigin = "anonymous";
+      maskImg.crossOrigin = "anonymous";
+
+      origImg.onload = checkLoaded;
+      aiImg.onload = checkLoaded;
+      maskImg.onload = checkLoaded;
+
+      origImg.onerror = () => resolve(aiResultUrl);
+      aiImg.onerror = () => resolve(aiResultUrl);
+      maskImg.onerror = () => resolve(aiResultUrl);
+
+      origImg.src = originalSrc;
+      aiImg.src = aiResultUrl;
+      maskImg.src = maskUrl;
+    });
+  }, []);
+
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!showGoldenRatio || !linePositions || !overlayCanvasRef.current) return;
 
@@ -780,7 +844,10 @@ export default function VisualizerApp() {
       });
 
       if (result.data?.images?.[0]?.url) {
-        setResultImage(result.data.images[0].url);
+        const rawAiUrl = result.data.images[0].url;
+        // Apply Method B Edge-Feathering before displaying result
+        const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
+        setResultImage(featheredUrl);
       } else {
         setErrorMessage("AI simulation failed to return an image.");
       }
