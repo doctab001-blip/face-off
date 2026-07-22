@@ -16,7 +16,7 @@ const FEATURE_INDICES: Record<string, number[]> = {
 
 const NOSE_LANDMARKS = [1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429];
 
-// Superior Zygomatic Body & Apex Focus (Higher up on cheekbones)
+// Superior Zygomatic Body & Apex Focus
 const CHEEK_LANDMARKS = {
   left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 36, 142, 100],
   right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 266, 371, 329],
@@ -188,7 +188,7 @@ export default function VisualizerApp() {
   const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("apple_volume");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
 
-  // DRAGGABLE GRID TOGGLE: DEFAULT SET TO FALSE (OFF)
+  // Draggable Grid Toggle: Default set to FALSE (OFF)
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
 
@@ -389,21 +389,23 @@ export default function VisualizerApp() {
     }
   }, [zoomScale, rawPixelLandmarks, updateViewportAndCrop]);
 
+  // ISOLATED MULTI-LAYER MASK COMPOSITING EFFECT
   useEffect(() => {
     if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
 
     const img = new Image();
     img.src = croppedImageSrc;
     img.onload = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+      const mainCanvas = canvasRef.current;
+      if (!mainCanvas) return;
+      mainCanvas.width = img.width;
+      mainCanvas.height = img.height;
+      const mainCtx = mainCanvas.getContext("2d");
+      if (!mainCtx) return;
 
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Clear main background to solid black (unmasked zone)
+      mainCtx.fillStyle = "black";
+      mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
 
       const upperLipCenter = mappedLandmarks[13];
       const lowerLipCenter = mappedLandmarks[14];
@@ -411,149 +413,156 @@ export default function VisualizerApp() {
         ? Math.hypot(lowerLipCenter.x - upperLipCenter.x, lowerLipCenter.y - upperLipCenter.y)
         : 0;
 
+      // Create an isolated layer canvas to safely composite individual feature blurs
+      const layerCanvas = document.createElement("canvas");
+      layerCanvas.width = img.width;
+      layerCanvas.height = img.height;
+      const layerCtx = layerCanvas.getContext("2d");
+
       selectedFeatures.forEach((feat) => {
-        ctx.save();
+        if (!layerCtx) return;
+
+        layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
+        layerCtx.save();
 
         if (feat === "brows") {
-          ctx.filter = "none";
+          layerCtx.filter = "none";
           const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
           const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
-
           const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP["medium"];
 
           [leftBrow, rightBrow].forEach((browIndices) => {
-            ctx.beginPath();
+            layerCtx.beginPath();
             const startPt = mappedLandmarks[browIndices[0]];
             if (!startPt) return;
-            ctx.moveTo(startPt.x, startPt.y);
+            layerCtx.moveTo(startPt.x, startPt.y);
             for (let i = 1; i < browIndices.length; i++) {
               const pt = mappedLandmarks[browIndices[i]];
-              if (pt) ctx.lineTo(pt.x, pt.y);
+              if (pt) layerCtx.lineTo(pt.x, pt.y);
             }
-            ctx.closePath();
-            ctx.fillStyle = "white";
-            ctx.fill();
+            layerCtx.closePath();
+            layerCtx.fillStyle = "white";
+            layerCtx.fill();
 
-            ctx.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
-            ctx.strokeStyle = "white";
-            ctx.lineJoin = "miter";
-            ctx.stroke();
+            layerCtx.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
+            layerCtx.strokeStyle = "white";
+            layerCtx.lineJoin = "miter";
+            layerCtx.stroke();
           });
         } else if (feat === "chin") {
           const config = CHIN_TECHNIQUES[chinTechnique];
-          ctx.filter = `blur(${config.blurPx}px)`;
+          layerCtx.filter = `blur(${config.blurPx}px)`;
 
-          ctx.beginPath();
+          layerCtx.beginPath();
           const startPt = mappedLandmarks[CHIN_LANDMARKS[0]];
           if (startPt) {
-            ctx.moveTo(startPt.x, startPt.y);
+            layerCtx.moveTo(startPt.x, startPt.y);
             for (let i = 1; i < CHIN_LANDMARKS.length; i++) {
               const pt = mappedLandmarks[CHIN_LANDMARKS[i]];
-              if (pt) ctx.lineTo(pt.x, pt.y);
+              if (pt) layerCtx.lineTo(pt.x, pt.y);
             }
-            ctx.closePath();
-            ctx.fillStyle = "white";
-            ctx.fill();
+            layerCtx.closePath();
+            layerCtx.fillStyle = "white";
+            layerCtx.fill();
 
-            ctx.lineWidth = 16;
-            ctx.strokeStyle = "white";
-            ctx.lineJoin = "round";
-            ctx.stroke();
+            layerCtx.lineWidth = 14;
+            layerCtx.strokeStyle = "white";
+            layerCtx.lineJoin = "round";
+            layerCtx.stroke();
           }
         } else if (feat === "cheeks") {
           const config = CHEEK_TECHNIQUES[cheekTechnique];
-          ctx.filter = `blur(${config.blurPx}px)`;
-
-          // Shift mask slightly upward to target high zygomatic body
+          layerCtx.filter = `blur(${config.blurPx}px)`;
           const shiftY = -10;
 
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
-            ctx.beginPath();
+            layerCtx.beginPath();
             const startPt = mappedLandmarks[cheekIndices[0]];
             if (!startPt) return;
-            ctx.moveTo(startPt.x, startPt.y + shiftY);
+            layerCtx.moveTo(startPt.x, startPt.y + shiftY);
             for (let i = 1; i < cheekIndices.length; i++) {
               const pt = mappedLandmarks[cheekIndices[i]];
-              if (pt) ctx.lineTo(pt.x, pt.y + shiftY);
+              if (pt) layerCtx.lineTo(pt.x, pt.y + shiftY);
             }
-            ctx.closePath();
-            ctx.fillStyle = "white";
-            ctx.fill();
+            layerCtx.closePath();
+            layerCtx.fillStyle = "white";
+            layerCtx.fill();
 
-            ctx.lineWidth = 12;
-            ctx.strokeStyle = "white";
-            ctx.lineJoin = "round";
-            ctx.stroke();
+            layerCtx.lineWidth = 10;
+            layerCtx.strokeStyle = "white";
+            layerCtx.lineJoin = "round";
+            layerCtx.stroke();
           });
         } else if (feat === "nose") {
-          ctx.filter = "blur(10px)";
-          const indices = NOSE_LANDMARKS;
+          layerCtx.filter = "blur(8px)";
 
-          if (indices && indices.length > 0) {
-            ctx.beginPath();
-            const startPt = mappedLandmarks[indices[0]];
+          if (NOSE_LANDMARKS && NOSE_LANDMARKS.length > 0) {
+            layerCtx.beginPath();
+            const startPt = mappedLandmarks[NOSE_LANDMARKS[0]];
             if (startPt) {
-              ctx.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < indices.length; i++) {
-                const pt = mappedLandmarks[indices[i]];
-                if (pt) ctx.lineTo(pt.x, pt.y);
+              layerCtx.moveTo(startPt.x, startPt.y);
+              for (let i = 1; i < NOSE_LANDMARKS.length; i++) {
+                const pt = mappedLandmarks[NOSE_LANDMARKS[i]];
+                if (pt) layerCtx.lineTo(pt.x, pt.y);
               }
-              ctx.closePath();
-              ctx.fillStyle = "white";
-              ctx.fill();
+              layerCtx.closePath();
+              layerCtx.fillStyle = "white";
+              layerCtx.fill();
 
-              ctx.lineWidth = 12;
-              ctx.strokeStyle = "white";
-              ctx.lineJoin = "round";
-              ctx.stroke();
+              layerCtx.lineWidth = 10;
+              layerCtx.strokeStyle = "white";
+              layerCtx.lineJoin = "round";
+              layerCtx.stroke();
             }
           }
         } else {
-          ctx.filter = "blur(10px)";
+          layerCtx.filter = "blur(8px)";
           const indices = FEATURE_INDICES[feat];
 
           if (indices && indices.length > 0) {
-            ctx.beginPath();
+            layerCtx.beginPath();
             const startPt = mappedLandmarks[indices[0]];
             if (startPt) {
-              ctx.moveTo(startPt.x, startPt.y);
-
+              layerCtx.moveTo(startPt.x, startPt.y);
               for (let i = 1; i < indices.length; i++) {
                 const pt = mappedLandmarks[indices[i]];
-                if (pt) ctx.lineTo(pt.x, pt.y);
+                if (pt) layerCtx.lineTo(pt.x, pt.y);
               }
-              ctx.closePath();
+              layerCtx.closePath();
 
               if (feat.includes("lip") && mouthGap > 6) {
                 const innerStart = mappedLandmarks[LIPS_INNER_INDICES[0]];
                 if (innerStart) {
-                  ctx.moveTo(innerStart.x, innerStart.y);
+                  layerCtx.moveTo(innerStart.x, innerStart.y);
                   for (let j = 1; j < LIPS_INNER_INDICES.length; j++) {
                     const innerPt = mappedLandmarks[LIPS_INNER_INDICES[j]];
-                    if (innerPt) ctx.lineTo(innerPt.x, innerPt.y);
+                    if (innerPt) layerCtx.lineTo(innerPt.x, innerPt.y);
                   }
-                  ctx.closePath();
+                  layerCtx.closePath();
                 }
               }
 
-              ctx.fillStyle = "white";
-              ctx.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
+              layerCtx.fillStyle = "white";
+              layerCtx.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
 
               if (feat.includes("lip")) {
                 const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
-                ctx.lineWidth = dosageConfig.dilationPx;
-                ctx.strokeStyle = "white";
-                ctx.lineJoin = "round";
-                ctx.stroke();
+                layerCtx.lineWidth = dosageConfig.dilationPx;
+                layerCtx.strokeStyle = "white";
+                layerCtx.lineJoin = "round";
+                layerCtx.stroke();
               }
             }
           }
         }
 
-        ctx.restore();
+        layerCtx.restore();
+
+        // Stamp feature layer onto main mask
+        mainCtx.drawImage(layerCanvas, 0, 0);
       });
 
-      setMaskDataUrl(canvas.toDataURL("image/png"));
+      setMaskDataUrl(mainCanvas.toDataURL("image/png"));
 
       if (overlayCanvasRef.current && linePositions) {
         const overlayCanvas = overlayCanvasRef.current;
@@ -565,7 +574,6 @@ export default function VisualizerApp() {
 
           if (showGoldenRatio) {
             const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositions;
-
             const lines = [
               { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
               { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
@@ -575,10 +583,8 @@ export default function VisualizerApp() {
 
             lines.forEach((line) => {
               const isDragging = activeDraggingLine === line.key;
-
               oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
               oCtx.lineWidth = isDragging ? 3 : 1.5;
-
               oCtx.beginPath();
               oCtx.moveTo(leftX - 25, line.y);
               oCtx.lineTo(rightX + 25, line.y);
@@ -597,7 +603,6 @@ export default function VisualizerApp() {
             oCtx.strokeStyle = "#f59e0b";
             oCtx.lineWidth = 2;
             oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
-
             oCtx.font = "11px monospace";
             oCtx.fillStyle = "#fbbf24";
             oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
