@@ -403,7 +403,6 @@ export default function VisualizerApp() {
       const mainCtx = mainCanvas.getContext("2d");
       if (!mainCtx) return;
 
-      // Clear main background to solid black (unmasked zone)
       mainCtx.fillStyle = "black";
       mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
 
@@ -413,7 +412,6 @@ export default function VisualizerApp() {
         ? Math.hypot(lowerLipCenter.x - upperLipCenter.x, lowerLipCenter.y - upperLipCenter.y)
         : 0;
 
-      // Create an isolated layer canvas to safely composite individual feature blurs
       const layerCanvas = document.createElement("canvas");
       layerCanvas.width = img.width;
       layerCanvas.height = img.height;
@@ -558,7 +556,6 @@ export default function VisualizerApp() {
 
         layerCtx.restore();
 
-        // Stamp feature layer onto main mask
         mainCtx.drawImage(layerCanvas, 0, 0);
       });
 
@@ -706,21 +703,17 @@ export default function VisualizerApp() {
           const ctx = canvas.getContext("2d");
           if (!ctx) return resolve(aiResultUrl);
 
-          // Step 1: Draw base AI result
           ctx.drawImage(aiImg, 0, 0, width, height);
 
-          // Step 2: Create soft-edged alpha mask on secondary canvas
           const alphaCanvas = document.createElement("canvas");
           alphaCanvas.width = width;
           alphaCanvas.height = height;
           const aCtx = alphaCanvas.getContext("2d");
           if (!aCtx) return resolve(aiResultUrl);
 
-          // Invert mask and apply heavy feather blur (16px)
           aCtx.filter = "blur(16px)";
           aCtx.drawImage(maskImg, 0, 0, width, height);
 
-          // Step 3: Draw original image through feathered perimeter to seamless blend edges
           ctx.save();
           ctx.globalCompositeOperation = "destination-out";
           ctx.drawImage(alphaCanvas, 0, 0);
@@ -845,7 +838,6 @@ export default function VisualizerApp() {
 
       if (result.data?.images?.[0]?.url) {
         const rawAiUrl = result.data.images[0].url;
-        // Apply Method B Edge-Feathering before displaying result
         const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
         setResultImage(featheredUrl);
       } else {
@@ -857,6 +849,86 @@ export default function VisualizerApp() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleExportPDF = () => {
+    if (!croppedImageSrc || !resultImage) return;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    const procedureList = selectedFeatures.map((f) => f.toUpperCase()).join(", ");
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Face-off.ai — Patient Consultation Summary</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #0f172a; max-width: 800px; margin: 0 auto; }
+            .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+            .title { font-size: 24px; font-weight: bold; font-family: serif; }
+            .subtitle { font-size: 12px; color: #64748b; }
+            .section { margin-bottom: 20px; }
+            .grid { display: flex; gap: 20px; margin-top: 15px; }
+            .card { flex: 1; text-align: center; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px; }
+            .card img { width: 100%; height: auto; border-radius: 6px; }
+            .metrics { background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0; font-family: monospace; font-size: 12px; }
+            .disclaimer { font-size: 10px; color: #94a3b8; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="title">Face-off.ai</div>
+              <div class="subtitle">Clinical Aesthetic Procedure Simulation Summary</div>
+            </div>
+            <div style="text-align: right; font-size: 11px; color: #64748b;">
+              Date: ${new Date().toLocaleDateString()}<br/>
+              Selected Procedures: <strong>${procedureList}</strong>
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>Visual Transformation Simulation</h3>
+            <div class="grid">
+              <div class="card">
+                <img src="${croppedImageSrc}" />
+                <p><strong>BEFORE (Baseline)</strong></p>
+              </div>
+              <div class="card">
+                <img src="${resultImage}" />
+                <p><strong>AFTER (${procedureList})</strong></p>
+              </div>
+            </div>
+          </div>
+
+          ${
+            fullFacePhi
+              ? `
+          <div class="section">
+            <h3>Facial Proportion Analysis (Rule of Thirds / Divine Φ)</h3>
+            <div class="metrics">
+              <p>Height/Width Ratio: <strong>${fullFacePhi.facePhiRatio}</strong> (Ideal Φ = 1.618)</p>
+              <p>Vertical Thirds Ratio (Upper : Mid : Lower): <strong>${fullFacePhi.verticalThirdsRatio}</strong></p>
+              <p>Facial Geometry Score: <strong>${fullFacePhi.overallScore}</strong></p>
+            </div>
+          </div>
+          `
+              : ""
+          }
+
+          <div class="disclaimer">
+            <strong>Medical Disclaimer:</strong> This visual simulation is provided for consultation and educational purposes only. It does not constitute a surgical guarantee. Final treatment plans depend on in-person clinical assessment by a licensed physician.
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   return (
@@ -1088,9 +1160,19 @@ export default function VisualizerApp() {
 
       {croppedImageSrc && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <p className="text-sm font-medium text-amber-200 mb-3">
-            {resultImage ? "Multi-Procedure Before & After Comparison:" : "Interactive Facial Canvas (Drag Lines to Adjust):"}
-          </p>
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-sm font-medium text-amber-200">
+              {resultImage ? "Multi-Procedure Before & After Comparison:" : "Interactive Facial Canvas (Drag Lines to Adjust):"}
+            </p>
+            {resultImage && (
+              <button
+                onClick={handleExportPDF}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition"
+              >
+                📄 Export Patient Summary (PDF)
+              </button>
+            )}
+          </div>
 
           <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
             {resultImage ? (
