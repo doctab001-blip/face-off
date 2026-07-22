@@ -310,8 +310,12 @@ export default function VisualizerApp() {
 
     const cropX = Math.max(0, leftCheekX - padX);
     const cropY = Math.max(0, calcTrichionY - padTop);
-    const cropW = Math.min(origW - cropX, faceWidth + padX * 2);
-    const cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
+    let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
+    let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
+
+    // FORCE MULTIPLE OF 64 FOR FLUX TENSOR DIMENSIONS
+    cropW = Math.max(64, Math.floor(cropW / 64) * 64);
+    cropH = Math.max(64, Math.floor(cropH / 64) * 64);
 
     const mapped = pixelLms.map((pt) => ({
       x: pt.x - cropX,
