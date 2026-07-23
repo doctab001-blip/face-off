@@ -10,8 +10,8 @@ import {
   UserButton, 
   OrganizationSwitcher 
 } from "@clerk/nextjs";
-fal.config({ proxyUrl: "/api/fal/proxy" });
 
+fal.config({ proxyUrl: "/api/fal/proxy" });
 const LIPS_INNER_INDICES = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
 
 const FEATURE_INDICES: Record<string, number[]> = {
@@ -952,7 +952,22 @@ export default function VisualizerApp() {
       {/* Header & Facility Auth Bar */}
       <div className="border-b border-gray-800 pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
+          <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1> 
+          <div className="flex items-center gap-4">
+    <Show when="signed-out">
+      <SignInButton mode="modal">
+        <button className="px-4 py-2 text-sm font-medium text-black bg-amber-400 rounded-md hover:bg-amber-500">
+          Sign In
+        </button>
+      </SignInButton>
+    </Show>
+
+    <Show when="signed-in">
+      <OrganizationSwitcher afterSelectOrganizationUrl="/" />
+      <UserButton afterSignOutUrl="/" />
+    </Show>
+  </div>
+</header>
           <p className="text-gray-400 text-xs md:text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
         </div>
 
@@ -967,7 +982,7 @@ export default function VisualizerApp() {
           </button>
 
           {/* Clerk Auth Integration */}
-          <Show when="signed-out">
+          <SignedOut>
             <div className="flex items-center gap-2">
               <SignInButton mode="modal">
                 <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium">
@@ -981,9 +996,9 @@ export default function VisualizerApp() {
                 </button>
               </SignUpButton>
             </div>
-          </Show when="signed-out">
+          </SignedOut>
 
-          <Show when="signed-in">
+          </SignedIn>
             <div className="flex items-center gap-2">
               <OrganizationSwitcher
                 appearance={{
@@ -995,7 +1010,7 @@ export default function VisualizerApp() {
               />
               <UserButton afterSignOutUrl="/" />
             </div>
-          </Show when="signed-in">
+          </SignedIn>
         </div>
       </div>
 
