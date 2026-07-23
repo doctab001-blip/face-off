@@ -3,8 +3,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
-import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton, OrganizationSwitcher } from "@clerk/nextjs";
-
+import { 
+  Show, 
+  SignInButton, 
+  SignUpButton, 
+  UserButton, 
+  OrganizationSwitcher 
+} from "@clerk/nextjs";
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
 const LIPS_INNER_INDICES = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
@@ -962,7 +967,7 @@ export default function VisualizerApp() {
           </button>
 
           {/* Clerk Auth Integration */}
-          <SignedOut>
+          <Show when="signed-out">
             <div className="flex items-center gap-2">
               <SignInButton mode="modal">
                 <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium">
@@ -976,9 +981,9 @@ export default function VisualizerApp() {
                 </button>
               </SignUpButton>
             </div>
-          </SignedOut>
+          </Show when="signed-out">
 
-          <SignedIn>
+          <Show when="signed-in">
             <div className="flex items-center gap-2">
               <OrganizationSwitcher
                 appearance={{
@@ -990,7 +995,7 @@ export default function VisualizerApp() {
               />
               <UserButton afterSignOutUrl="/" />
             </div>
-          </SignedIn>
+          </Show when="signed-in">
         </div>
       </div>
 
