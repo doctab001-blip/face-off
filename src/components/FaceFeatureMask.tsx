@@ -100,10 +100,10 @@ export function FaceFeatureMask({
         setImageSize({
           width: readySource instanceof HTMLImageElement
             ? readySource.naturalWidth
-            : readySource.width,
+            : (readySource as any)?.width || 0,
           height: readySource instanceof HTMLImageElement
             ? readySource.naturalHeight
-            : readySource.height,
+            : (readySource as any)?.height || 0,
         });
         onLandmarksDetected?.(detected);
       } catch (err) {
