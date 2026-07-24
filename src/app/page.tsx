@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { fal } from "@fal-ai/client";
-import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
@@ -124,15 +124,16 @@ export default function VisualizerApp() {
 
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks", "nose"]);
 
-  const [browTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
-  const [browThickness] = useState<"thin" | "medium" | "thick">("medium");
+  const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
+  const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
 
-  const [lipDosage] = useState<string>("0.50ml");
+  const [lipTechnique, setLipTechnique] = useState<keyof typeof LIP_TECHNIQUES>("russian");
+  const [lipDosage, setLipDosage] = useState<string>("0.50ml");
 
   const [noseTechnique, setNoseTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("straight_slim");
   const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
   const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
-  const [chinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
+  const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
 
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
 
@@ -144,6 +145,8 @@ export default function VisualizerApp() {
     leftX: number;
     rightX: number;
   } | null>(null);
+
+  const [activeDraggingLine, setActiveDraggingLine] = useState<string | null>(null);
 
   const [fullFacePhi, setFullFacePhi] = useState<{
     facePhiRatio: string;
@@ -513,8 +516,9 @@ export default function VisualizerApp() {
             ];
 
             lines.forEach((line) => {
-              oCtx.strokeStyle = "#818cf8";
-              oCtx.lineWidth = 1.5;
+              const isDragging = activeDraggingLine === line.key;
+              oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.lineWidth = isDragging ? 3 : 1.5;
               oCtx.beginPath();
               oCtx.moveTo(leftX - 25, line.y);
               oCtx.lineTo(rightX + 25, line.y);
@@ -524,7 +528,7 @@ export default function VisualizerApp() {
         }
       }
     };
-  }, [mappedLandmarks, linePositions, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc]);
+  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc]);
 
   const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
     return new Promise((resolve) => {
@@ -651,6 +655,48 @@ export default function VisualizerApp() {
     }
   };
 
+  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!showGoldenRatio || !linePositions || !overlayCanvasRef.current) return;
+
+    const rect = overlayCanvasRef.current.getBoundingClientRect();
+    const scaleY = overlayCanvasRef.current.height / rect.height;
+    const clickY = (e.clientY - rect.top) * scaleY;
+
+    const threshold = 18;
+    const keys: Array<keyof typeof linePositions> = ["trichion", "glabella", "subnasale", "menton"];
+
+    for (const key of keys) {
+      if (Math.abs(linePositions[key] - clickY) < threshold) {
+        setActiveDraggingLine(key);
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        break;
+      }
+    }
+  };
+
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!activeDraggingLine || !linePositions || !overlayCanvasRef.current) return;
+
+    const rect = overlayCanvasRef.current.getBoundingClientRect();
+    const scaleY = overlayCanvasRef.current.height / rect.height;
+    const newY = (e.clientY - rect.top) * scaleY;
+
+    const updated = {
+      ...linePositions,
+      [activeDraggingLine]: newY,
+    };
+
+    setLinePositions(updated);
+    recalculateMetricsFromLines(updated);
+  };
+
+  const handleCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activeDraggingLine) {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      setActiveDraggingLine(null);
+    }
+  };
+
   const handleExportPDF = () => {
     if (!croppedImageSrc || !resultImage) return;
 
@@ -757,18 +803,36 @@ export default function VisualizerApp() {
             {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
           </button>
 
-          {/* Clerk Auth Integration Cleaned */}
-          <div className="flex items-center gap-2">
-            <OrganizationSwitcher
-              appearance={{
-                elements: {
-                  rootBox: "bg-gray-800 rounded border border-gray-700 text-xs",
-                  organizationSwitcherTrigger: "text-xs text-amber-200 py-1 px-2",
-                },
-              }}
-            />
-            <UserButton afterSignOutUrl="/" />
-          </div>
+          {/* Real Clerk Auth Integration */}
+          <SignedOut>
+            <div className="flex items-center gap-2">
+              <SignInButton mode="modal">
+                <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium">
+                  Facility Sign In
+                </button>
+              </SignInButton>
+
+              <SignUpButton mode="modal">
+                <button className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded font-medium">
+                  Register Facility
+                </button>
+              </SignUpButton>
+            </div>
+          </SignedOut>
+
+          <SignedIn>
+            <div className="flex items-center gap-2">
+              <OrganizationSwitcher
+                appearance={{
+                  elements: {
+                    rootBox: "bg-gray-800 rounded border border-gray-700 text-xs",
+                    organizationSwitcherTrigger: "text-xs text-amber-200 py-1 px-2",
+                  },
+                }}
+              />
+              <UserButton afterSignOutUrl="/" />
+            </div>
+          </SignedIn>
         </div>
       </div>
 
@@ -868,6 +932,78 @@ export default function VisualizerApp() {
                   </select>
                 </div>
               )}
+
+              {/* Eyebrow Selector */}
+              {selectedFeatures.includes("brows") && (
+                <div className="space-y-2">
+                  <label className="block text-xs text-gray-400">Eyebrow Style & Thickness</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={browTechnique}
+                      onChange={(e) => setBrowTechnique(e.target.value as keyof typeof BROW_TECHNIQUES)}
+                      className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
+                    >
+                      <option value="ombre_powder">Ombré Powder</option>
+                      <option value="microblading">Microblading</option>
+                    </select>
+
+                    <select
+                      value={browThickness}
+                      onChange={(e) => setBrowThickness(e.target.value as "thin" | "medium" | "thick")}
+                      className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
+                    >
+                      <option value="thin">Thin</option>
+                      <option value="medium">Medium</option>
+                      <option value="thick">Thick</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Lip Selector */}
+              {(selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) && (
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Lip Technique & Dosage</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={lipTechnique}
+                      onChange={(e) => setLipTechnique(e.target.value as keyof typeof LIP_TECHNIQUES)}
+                      className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
+                    >
+                      <option value="russian">Russian Lift</option>
+                      <option value="classic_lip">Classic 3D</option>
+                    </select>
+                    <select
+                      value={lipDosage}
+                      onChange={(e) => setLipDosage(e.target.value)}
+                      className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
+                    >
+                      <option value="0.25ml">0.25ml</option>
+                      <option value="0.50ml">0.50ml</option>
+                      <option value="0.75ml">0.75ml</option>
+                      <option value="1.00ml">1.00ml</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Chin Selector */}
+              {selectedFeatures.includes("chin") && (
+                <div>
+                  <label className="block text-xs text-amber-300 font-medium mb-1">Chin Procedure Preset</label>
+                  <select
+                    value={chinTechnique}
+                    onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
+                    className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
+                  >
+                    {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
+                      <option key={key} value={key}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -902,14 +1038,12 @@ export default function VisualizerApp() {
               <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800 touch-none">
                 {resultImage ? (
                   <div className="relative w-full aspect-square select-none touch-none">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
 
                     <div
                       className="absolute inset-y-0 left-0 overflow-hidden pointer-events-none"
                       style={{ width: `${sliderPos}%` }}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={croppedImageSrc}
                         alt="Before"
@@ -938,11 +1072,13 @@ export default function VisualizerApp() {
                   </div>
                 ) : (
                   <div className="relative w-full aspect-square touch-none">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-full object-cover pointer-events-none" />
                     <canvas
                       ref={overlayCanvasRef}
-                      className="absolute inset-0 w-full h-full touch-none"
+                      onPointerDown={handleCanvasPointerDown}
+                      onPointerMove={handleCanvasPointerMove}
+                      onPointerUp={handleCanvasPointerUp}
+                      className="absolute inset-0 w-full h-full cursor-ns-resize touch-none"
                       style={{ touchAction: "none" }}
                     />
                   </div>
