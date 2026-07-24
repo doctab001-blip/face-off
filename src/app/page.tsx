@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { fal } from "@fal-ai/client";
-import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton, OrganizationSwitcher } from "@clerk/nextjs";
+import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
@@ -124,6 +124,7 @@ export default function VisualizerApp() {
 
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks", "nose"]);
 
+  // STRICTLY TYPED STATES TO PREVENT 'ANY' ERRORS
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
   const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
 
@@ -668,7 +669,9 @@ export default function VisualizerApp() {
     for (const key of keys) {
       if (Math.abs(linePositions[key] - clickY) < threshold) {
         setActiveDraggingLine(key);
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        if (e.target && "setPointerCapture" in e.target) {
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        }
         break;
       }
     }
@@ -692,7 +695,9 @@ export default function VisualizerApp() {
 
   const handleCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (activeDraggingLine) {
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      if (e.target && "releasePointerCapture" in e.target) {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      }
       setActiveDraggingLine(null);
     }
   };
@@ -803,36 +808,21 @@ export default function VisualizerApp() {
             {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
           </button>
 
-          {/* Real Clerk Auth Integration */}
-          <SignedOut>
-            <div className="flex items-center gap-2">
-              <SignInButton mode="modal">
-                <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium">
-                  Facility Sign In
-                </button>
-              </SignInButton>
-
-              <SignUpButton mode="modal">
-                <button className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded font-medium">
-                  Register Facility
-                </button>
-              </SignUpButton>
-            </div>
-          </SignedOut>
-
-          <SignedIn>
-            <div className="flex items-center gap-2">
-              <OrganizationSwitcher
-                appearance={{
-                  elements: {
-                    rootBox: "bg-gray-800 rounded border border-gray-700 text-xs",
-                    organizationSwitcherTrigger: "text-xs text-amber-200 py-1 px-2",
-                  },
-                }}
-              />
-              <UserButton afterSignOutUrl="/" />
-            </div>
-          </SignedIn>
+          {/* Cleaned Clerk Auth & Fallback Sign-In Links */}
+          <div className="flex items-center gap-2">
+            <a href="/sign-in" className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium text-white transition">
+              Facility Auth
+            </a>
+            <OrganizationSwitcher
+              appearance={{
+                elements: {
+                  rootBox: "bg-gray-800 rounded border border-gray-700 text-xs",
+                  organizationSwitcherTrigger: "text-xs text-amber-200 py-1 px-2",
+                },
+              }}
+            />
+            <UserButton afterSignOutUrl="/" />
+          </div>
         </div>
       </div>
 
@@ -1038,12 +1028,14 @@ export default function VisualizerApp() {
               <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800 touch-none">
                 {resultImage ? (
                   <div className="relative w-full aspect-square select-none touch-none">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
 
                     <div
                       className="absolute inset-y-0 left-0 overflow-hidden pointer-events-none"
                       style={{ width: `${sliderPos}%` }}
                     >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={croppedImageSrc}
                         alt="Before"
@@ -1072,6 +1064,7 @@ export default function VisualizerApp() {
                   </div>
                 ) : (
                   <div className="relative w-full aspect-square touch-none">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-full object-cover pointer-events-none" />
                     <canvas
                       ref={overlayCanvasRef}
