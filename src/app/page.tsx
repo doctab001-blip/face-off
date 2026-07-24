@@ -124,7 +124,6 @@ export default function VisualizerApp() {
 
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks", "nose"]);
 
-  // STRICTLY TYPED STATES TO PREVENT 'ANY' ERRORS
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
   const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
 
@@ -808,7 +807,7 @@ export default function VisualizerApp() {
             {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
           </button>
 
-          {/* Cleaned Clerk Auth & Fallback Sign-In Links */}
+          {/* Cleaned Clerk Auth */}
           <div className="flex items-center gap-2">
             <a href="/sign-in" className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium text-white transition">
               Facility Auth
@@ -821,7 +820,7 @@ export default function VisualizerApp() {
                 },
               }}
             />
-            <UserButton afterSignOutUrl="/" />
+            <UserButton />
           </div>
         </div>
       </div>
