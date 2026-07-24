@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
-import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton, OrganizationSwitcher } from "@clerk/nextjs";
+import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
@@ -29,36 +28,26 @@ const NOSE_TECHNIQUES = {
     name: "Straight & Slim Refinement",
     prompt_suffix: "flawless narrow straight nasal bridge, delicate supratip break, refined defined nasal tip cartilage, subtle alar narrowing, seamless skin texture, photorealistic, 8k resolution",
     strength: 0.52,
-    pinchRadiusRatio: 0.32,
-    pinchAmount: 0.28,
   },
   dorsal_hump: {
     name: "Dorsal Hump Reduction",
     prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
     strength: 0.48,
-    pinchRadiusRatio: 0.25,
-    pinchAmount: 0.20,
   },
   tip_plasty: {
     name: "Nasal Tip Refinement",
     prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
     strength: 0.45,
-    pinchRadiusRatio: 0.22,
-    pinchAmount: 0.22,
   },
   alar_reduction: {
     name: "Alar Base Narrowing",
     prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
     strength: 0.42,
-    pinchRadiusRatio: 0.20,
-    pinchAmount: 0.20,
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
     prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
     strength: 0.40,
-    pinchRadiusRatio: 0.18,
-    pinchAmount: 0.12,
   },
 };
 
@@ -135,19 +124,17 @@ export default function VisualizerApp() {
 
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks", "nose"]);
 
-  const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
-  const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
+  const [browTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
+  const [browThickness] = useState<"thin" | "medium" | "thick">("medium");
 
-  const [lipTechnique, setLipTechnique] = useState<keyof typeof LIP_TECHNIQUES>("russian");
-  const [lipDosage, setLipDosage] = useState<string>("0.50ml");
+  const [lipDosage] = useState<string>("0.50ml");
 
   const [noseTechnique, setNoseTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("straight_slim");
   const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
   const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
-  const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
+  const [chinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
 
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
-  const [zoomScale, setZoomScale] = useState<number>(100);
 
   const [linePositions, setLinePositions] = useState<{
     trichion: number;
@@ -158,15 +145,14 @@ export default function VisualizerApp() {
     rightX: number;
   } | null>(null);
 
-  const [activeDraggingLine, setActiveDraggingLine] = useState<string | null>(null);
-
   const [fullFacePhi, setFullFacePhi] = useState<{
     facePhiRatio: string;
     verticalThirdsRatio: string;
     overallScore: string;
   } | null>(null);
 
-  const [landmarker, setLandmarker] = useState<FaceLandmarker | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [landmarker, setLandmarker] = useState<any | null>(null);
   const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
   const [mappedLandmarks, setMappedLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
 
@@ -182,7 +168,9 @@ export default function VisualizerApp() {
 
   useEffect(() => {
     async function initMediaPipe() {
+      if (typeof window === "undefined") return;
       try {
+        const { FilesetResolver, FaceLandmarker } = await import("@mediapipe/tasks-vision");
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
         );
@@ -264,7 +252,6 @@ export default function VisualizerApp() {
     let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
     let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
 
-    // Enforce 64px multiple to eliminate PyTorch 422 shape mismatch errors
     cropW = Math.max(64, Math.floor(cropW / 64) * 64);
     cropH = Math.max(64, Math.floor(cropH / 64) * 64);
 
@@ -326,7 +313,7 @@ export default function VisualizerApp() {
             }));
 
             setRawPixelLandmarks(pixelLms);
-            updateViewportAndCrop(img, pixelLms, zoomScale);
+            updateViewportAndCrop(img, pixelLms, 100);
           } else {
             setErrorMessage("No face detected. Upload a clear front-facing portrait.");
           }
@@ -340,11 +327,10 @@ export default function VisualizerApp() {
 
   useEffect(() => {
     if (loadedImageRef.current && rawPixelLandmarks) {
-      updateViewportAndCrop(loadedImageRef.current, rawPixelLandmarks, zoomScale);
+      updateViewportAndCrop(loadedImageRef.current, rawPixelLandmarks, 100);
     }
-  }, [zoomScale, rawPixelLandmarks, updateViewportAndCrop]);
+  }, [rawPixelLandmarks, updateViewportAndCrop]);
 
-  // ISOLATED MULTI-LAYER MASK COMPOSITING
   useEffect(() => {
     if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
 
@@ -527,9 +513,8 @@ export default function VisualizerApp() {
             ];
 
             lines.forEach((line) => {
-              const isDragging = activeDraggingLine === line.key;
-              oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
-              oCtx.lineWidth = isDragging ? 3 : 1.5;
+              oCtx.strokeStyle = "#818cf8";
+              oCtx.lineWidth = 1.5;
               oCtx.beginPath();
               oCtx.moveTo(leftX - 25, line.y);
               oCtx.lineTo(rightX + 25, line.y);
@@ -539,9 +524,8 @@ export default function VisualizerApp() {
         }
       }
     };
-  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc]);
+  }, [mappedLandmarks, linePositions, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc]);
 
-  // METHOD B: ADAPTIVE ALPHA EDGE-FEATHERING POST-PROCESSOR
   const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
     return new Promise((resolve) => {
       const origImg = new Image();
@@ -773,36 +757,18 @@ export default function VisualizerApp() {
             {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
           </button>
 
-          {/* Real Clerk Auth Integration */}
-          <SignedOut>
-            <div className="flex items-center gap-2">
-              <SignInButton mode="modal">
-                <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded border border-gray-700 font-medium">
-                  Facility Sign In
-                </button>
-              </SignInButton>
-
-              <SignUpButton mode="modal">
-                <button className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded font-medium">
-                  Register Facility
-                </button>
-              </SignUpButton>
-            </div>
-          </SignedOut>
-
-          <SignedIn>
-            <div className="flex items-center gap-2">
-              <OrganizationSwitcher
-                appearance={{
-                  elements: {
-                    rootBox: "bg-gray-800 rounded border border-gray-700 text-xs",
-                    organizationSwitcherTrigger: "text-xs text-amber-200 py-1 px-2",
-                  },
-                }}
-              />
-              <UserButton afterSignOutUrl="/" />
-            </div>
-          </SignedIn>
+          {/* Clerk Auth Integration Cleaned */}
+          <div className="flex items-center gap-2">
+            <OrganizationSwitcher
+              appearance={{
+                elements: {
+                  rootBox: "bg-gray-800 rounded border border-gray-700 text-xs",
+                  organizationSwitcherTrigger: "text-xs text-amber-200 py-1 px-2",
+                },
+              }}
+            />
+            <UserButton afterSignOutUrl="/" />
+          </div>
         </div>
       </div>
 
