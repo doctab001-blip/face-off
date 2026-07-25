@@ -5,7 +5,6 @@ import { fal } from "@fal-ai/client";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
-// Procedure & Configuration Types
 type ProcedureId = "chin" | "cheeks" | "rhinoplasty" | "eyebrows" | "upperLip" | "lowerLip";
 
 interface ProcedureConfig {
@@ -15,7 +14,6 @@ interface ProcedureConfig {
   intensity: number;
 }
 
-// Subscription & Facility Management Types
 type SubscriptionTierId = "boutique" | "clinical_group" | "enterprise";
 
 interface SubscriptionTier {
@@ -76,7 +74,7 @@ const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
     features: [
       "Up to 5 Practitioner Accounts",
       "500 HD AI Simulations / month",
-      "Gemini 3.1 Flash Image Engine",
+      "FLUX.1 Pro Fill Engine",
       "Custom Facility Logo on PDF Reports",
       "Multi-Mask Layering & Comparison Slider",
       "Priority Clinical Support",
@@ -234,18 +232,10 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function parseDataUrl(dataUrl: string): { mimeType: string; base64Data: string } {
-  const matches = dataUrl.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
-  if (matches && matches.length === 3) {
-    return { mimeType: matches[1], base64Data: matches[2] };
-  }
-  return { mimeType: "image/jpeg", base64Data: dataUrl.replace(/^data:image\/\w+;base64,/, "") };
-}
-
-async function generateLocalSculptedSimulation(
+// Generates a proper white mask on a black background for targeted facial regions
+async function generateMaskForProcedures(
   imageSrc: string,
-  selectedProcedures: ProcedureId[],
-  configs: Record<ProcedureId, ProcedureConfig>
+  selectedProcedures: ProcedureId[]
 ): Promise<string> {
   const img = await loadImage(imageSrc);
   const canvas = document.createElement("canvas");
@@ -256,106 +246,36 @@ async function generateLocalSculptedSimulation(
   const ctx = canvas.getContext("2d");
   if (!ctx) return imageSrc;
 
-  ctx.drawImage(img, 0, 0, width, height);
+  // Black background (untouched areas)
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, width, height);
+
+  // White areas indicate regions to be modified by FLUX.1 Fill
+  ctx.fillStyle = "white";
+  ctx.filter = "blur(12px)";
 
   selectedProcedures.forEach((procId) => {
-    const conf = configs[procId];
-    const baseFactor = (conf.intensity || 50) / 100;
-
-    let volumeMultiplier = 1.0;
-    if (conf.preset.includes("0.5 mL")) volumeMultiplier = 0.6;
-    if (conf.preset.includes("1.0 mL")) volumeMultiplier = 1.0;
-    if (conf.preset.includes("1.5 mL")) volumeMultiplier = 1.45;
-
-    const factor = baseFactor * volumeMultiplier;
-
     ctx.save();
     if (procId === "chin") {
-      const grad = ctx.createRadialGradient(
-        width * 0.5, height * 0.82, 5,
-        width * 0.5, height * 0.82, width * 0.18
-      );
-      grad.addColorStop(0, `rgba(255, 250, 240, ${0.35 * factor})`);
-      grad.addColorStop(0.5, `rgba(240, 210, 190, ${0.2 * factor})`);
-      grad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.ellipse(width * 0.5, height * 0.82, width * 0.14, height * 0.08 * (1 + factor * 0.3), 0, 0, Math.PI * 2);
+      ctx.ellipse(width * 0.5, height * 0.82, width * 0.12, height * 0.07, 0, 0, Math.PI * 2);
       ctx.fill();
     } else if (procId === "cheeks") {
       [0.36, 0.64].forEach((posX) => {
-        const cheekGrad = ctx.createRadialGradient(
-          width * posX, height * 0.48, 5,
-          width * posX, height * 0.48, width * 0.15
-        );
-        cheekGrad.addColorStop(0, `rgba(255, 245, 235, ${0.3 * factor})`);
-        cheekGrad.addColorStop(0.6, `rgba(235, 195, 175, ${0.15 * factor})`);
-        cheekGrad.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = cheekGrad;
         ctx.beginPath();
-        ctx.ellipse(width * posX, height * 0.48, width * 0.11, height * 0.07, posX > 0.5 ? -0.2 : 0.2, 0, Math.PI * 2);
+        ctx.ellipse(width * posX, height * 0.48, width * 0.10, height * 0.06, posX > 0.5 ? -0.2 : 0.2, 0, Math.PI * 2);
         ctx.fill();
       });
     } else if (procId === "rhinoplasty") {
-      const isStraightSlim = conf.preset.includes("Straight & Slim");
-      const isTipOnly = conf.preset.includes("Tip");
-
-      if (isStraightSlim) {
-        const bridgeHighlight = ctx.createLinearGradient(width * 0.49, height * 0.35, width * 0.51, height * 0.55);
-        bridgeHighlight.addColorStop(0, `rgba(255, 255, 255, ${0.4 * factor})`);
-        bridgeHighlight.addColorStop(0.5, `rgba(250, 240, 230, ${0.3 * factor})`);
-        bridgeHighlight.addColorStop(1, `rgba(255, 255, 255, ${0.45 * factor})`);
-        ctx.fillStyle = bridgeHighlight;
-        ctx.fillRect(width * 0.492, height * 0.36, width * 0.016, height * 0.18);
-
-        [0.47, 0.51].forEach((edgeX) => {
-          const shadow = ctx.createLinearGradient(width * edgeX, height * 0.36, width * (edgeX + 0.02), height * 0.36);
-          shadow.addColorStop(0, `rgba(30, 20, 15, ${0.15 * factor})`);
-          shadow.addColorStop(1, "rgba(0,0,0,0)");
-          ctx.fillStyle = shadow;
-          ctx.fillRect(width * edgeX, height * 0.36, width * 0.02, height * 0.18);
-        });
-      } else {
-        const noseGrad = ctx.createLinearGradient(width * 0.48, height * 0.35, width * 0.52, height * 0.56);
-        noseGrad.addColorStop(0, `rgba(255, 255, 255, ${0.25 * factor})`);
-        noseGrad.addColorStop(0.6, `rgba(245, 220, 205, ${0.15 * factor})`);
-        noseGrad.addColorStop(1, `rgba(255, 255, 255, ${0.35 * factor})`);
-        ctx.fillStyle = noseGrad;
-        ctx.fillRect(width * 0.48, height * 0.36, width * 0.04, height * (isTipOnly ? 0.12 : 0.18));
-      }
+      ctx.fillRect(width * 0.47, height * 0.35, width * 0.06, height * 0.22);
     } else if (procId === "upperLip" || procId === "lowerLip") {
-      const isUpper = procId === "upperLip";
-      const posY = isUpper ? 0.63 : 0.66;
-      
-      const lipGrad = ctx.createRadialGradient(
-        width * 0.5, height * posY, 2,
-        width * 0.5, height * posY, width * (0.08 + factor * 0.04)
-      );
-      
-      lipGrad.addColorStop(0, `rgba(235, 110, 130, ${Math.min(0.55, 0.3 * factor)})`);
-      lipGrad.addColorStop(0.6, `rgba(215, 90, 110, ${Math.min(0.3, 0.15 * factor)})`);
-      lipGrad.addColorStop(1, "rgba(0,0,0,0)");
-      
-      ctx.fillStyle = lipGrad;
+      const posY = procId === "upperLip" ? 0.63 : 0.66;
       ctx.beginPath();
-      ctx.ellipse(
-        width * 0.5,
-        height * posY,
-        width * (0.09 + factor * 0.03),
-        height * (isUpper ? 0.025 : 0.035) * (1 + factor * 0.5),
-        0, 0, Math.PI * 2
-      );
+      ctx.ellipse(width * 0.5, height * posY, width * 0.08, height * 0.03, 0, 0, Math.PI * 2);
       ctx.fill();
     } else if (procId === "eyebrows") {
       [0.35, 0.65].forEach((posX) => {
-        const browGrad = ctx.createRadialGradient(
-          width * posX, height * 0.3, 2,
-          width * posX, height * 0.3, width * 0.12
-        );
-        browGrad.addColorStop(0, `rgba(255, 255, 240, ${0.28 * factor})`);
-        browGrad.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = browGrad;
-        ctx.fillRect(width * (posX - 0.08), height * 0.28, width * 0.16, height * 0.04);
+        ctx.fillRect(width * (posX - 0.07), height * 0.28, width * 0.14, height * 0.04);
       });
     }
     ctx.restore();
@@ -366,7 +286,6 @@ async function generateLocalSculptedSimulation(
 
 export default function VisualizerApp() {
   const [activeTab, setActiveTab] = useState<"visualizer" | "pricing" | "register" | "facility_portal" | "admin_portal">("visualizer");
-  
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -516,100 +435,36 @@ export default function VisualizerApp() {
   const runSimulation = async () => {
     if (!imageSrc) return;
     setIsProcessing(true);
-    setStatusText("Initializing AI Aesthetic Engine...");
-
-    let simulatedResultUrl: string | null = null;
-
-    const procedureDirectives = selectedProcedures
-      .map((id) => {
-        const c = configs[id];
-        return `- ${c.label}: Preset '${c.preset}' at ${c.intensity}% scale multiplier`;
-      })
-      .join("\n");
-
-    const promptText = `
-Act as a world-class board-certified aesthetic plastic surgeon and facial sculptor.
-Modify this patient portrait photo to show a subtle, photorealistic outcome for these procedures:
-${procedureDirectives}
-
-CRITICAL DIRECTIVES:
-- For Rhinoplasty: execute requested preset (such as a straight and slim nasal bridge).
-- For Lips: apply exact dermal filler volume scale (0.5 mL, 1.0 mL, or 1.5 mL).
-- Keep identity, lighting, hair, eyes, and skin tone 100% identical.
-- Output a high-resolution, photorealistic clinical outcome portrait.
-`.trim();
+    setStatusText("Generating mask & querying FLUX.1 Pro Fill engine...");
 
     try {
-      setStatusText("Querying Flux Pro Inpainting Engine via Fal.ai...");
+      const maskUrl = await generateMaskForProcedures(imageSrc, selectedProcedures);
+
+      const procedureDirectives = selectedProcedures
+        .map((id) => {
+          const c = configs[id];
+          return `${c.label} (${c.preset} at ${c.intensity}% scale)`;
+        })
+        .join(", ");
+
+      const promptText = `A professional clinical aesthetic procedure result showing subtle, natural, photorealistic changes for: ${procedureDirectives}. Maintain 100% identity, skin texture, lighting, and background of the original patient portrait.`;
+
       const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           prompt: promptText,
           image_url: imageSrc,
-          mask_url: imageSrc,
+          mask_url: maskUrl,
         },
       });
 
       if (result.data?.images?.[0]?.url) {
-        simulatedResultUrl = result.data.images[0].url;
+        setResultImage(result.data.images[0].url);
+      } else {
+        setResultImage(imageSrc);
       }
     } catch (err) {
-      console.warn("Fal.ai direct subscription failed, trying backup engine:", err);
-    }
-
-    if (!simulatedResultUrl) {
-      try {
-        setStatusText("Querying Gemini 3.1 Flash Image preview engine...");
-        const { mimeType, base64Data } = parseDataUrl(imageSrc);
-
-        const apiKey = "";
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`;
-
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  { text: promptText },
-                  {
-                    inlineData: {
-                      mimeType: mimeType,
-                      data: base64Data,
-                    },
-                  },
-                ],
-              },
-            ],
-            generationConfig: {
-              responseModalities: ["TEXT", "IMAGE"],
-            },
-          }),
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const imagePart = result?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-          if (imagePart && imagePart.inlineData?.data) {
-            const resMime = imagePart.inlineData.mimeType || "image/png";
-            simulatedResultUrl = `data:${resMime};base64,${imagePart.inlineData.data}`;
-          }
-        }
-      } catch (err) {
-        console.warn("Gemini direct API failed:", err);
-      }
-    }
-
-    if (!simulatedResultUrl) {
-      setStatusText("Applying local surgical contour & dermal volume simulation...");
-      try {
-        simulatedResultUrl = await generateLocalSculptedSimulation(imageSrc, selectedProcedures, configs);
-      } catch (e) {
-        console.error("Local sculpting failed:", e);
-        simulatedResultUrl = imageSrc;
-      }
+      console.error("FLUX.1 Pro Fill execution failed:", err);
+      setResultImage(imageSrc);
     }
 
     if (activeFacilityId) {
@@ -620,7 +475,6 @@ CRITICAL DIRECTIVES:
       );
     }
 
-    setResultImage(simulatedResultUrl);
     setIsProcessing(false);
     setStatusText("");
   };
@@ -1020,10 +874,10 @@ CRITICAL DIRECTIVES:
                     {isProcessing ? (
                       <span className="flex items-center gap-2">
                         <span className="animate-spin text-sm">✨</span>
-                        <span>Simulating ({selectedProcedures.length} Procedures)...</span>
+                        <span>Simulating FLUX Pro ({selectedProcedures.length} Procedures)...</span>
                       </span>
                     ) : (
-                      <span>Run AI Simulation ({selectedProcedures.length} Targets)</span>
+                      <span>Run FLUX.1 Pro Fill ({selectedProcedures.length} Targets)</span>
                     )}
                   </button>
                 </div>
@@ -1121,7 +975,7 @@ CRITICAL DIRECTIVES:
                 {imageSrc ? (
                   <div className="relative w-full max-w-lg h-[500px] flex items-center justify-center bg-black/80 rounded-xl overflow-hidden border border-slate-800 shadow-2xl">
                     <div
-                      className="w-full h-full flex items-center justify-center transition-transform duration-300 ease-out"
+                      className="w-full h-full flex items-center justify-center transition-transform duration-300 ease-out overflow-hidden"
                       style={{
                         transform: `scale(${zoomLevel}) translate(${panOffset.x}px, ${panOffset.y}px)`,
                       }}
@@ -1130,7 +984,7 @@ CRITICAL DIRECTIVES:
                         ref={imageRef}
                         src={imageSrc}
                         alt="Patient Baseline"
-                        className="max-w-full max-h-full object-contain"
+                        className="w-full h-full object-cover"
                       />
                     </div>
 
@@ -1199,7 +1053,7 @@ CRITICAL DIRECTIVES:
                     onTouchEnd={() => setIsDraggingSlider(false)}
                   >
                     <div
-                      className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-out pointer-events-none"
+                      className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-out overflow-hidden pointer-events-none"
                       style={{
                         transform: `scale(${zoomLevel}) translate(${panOffset.x}px, ${panOffset.y}px)`,
                       }}
@@ -1207,7 +1061,7 @@ CRITICAL DIRECTIVES:
                       <img
                         src={resultImage}
                         alt="Simulated Outcome"
-                        className="max-w-full max-h-full object-contain"
+                        className="w-full h-full object-cover"
                       />
                     </div>
 
@@ -1216,7 +1070,7 @@ CRITICAL DIRECTIVES:
                       style={{ width: `${sliderPos}%` }}
                     >
                       <div
-                        className="w-full h-full flex items-center justify-center transition-transform duration-300 ease-out"
+                        className="w-full h-full flex items-center justify-center transition-transform duration-300 ease-out overflow-hidden"
                         style={{
                           width: "100%",
                           transform: `scale(${zoomLevel}) translate(${panOffset.x}px, ${panOffset.y}px)`,
@@ -1225,7 +1079,7 @@ CRITICAL DIRECTIVES:
                         <img
                           src={imageSrc || ""}
                           alt="Baseline Overlay"
-                          className="max-w-full max-h-full object-contain"
+                          className="w-full h-full object-cover"
                         />
                       </div>
                     </div>
