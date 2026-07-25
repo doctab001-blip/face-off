@@ -232,7 +232,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-// Generates a proper white mask on a black background for targeted facial regions
 async function generateMaskForProcedures(
   imageSrc: string,
   selectedProcedures: ProcedureId[]
@@ -246,11 +245,9 @@ async function generateMaskForProcedures(
   const ctx = canvas.getContext("2d");
   if (!ctx) return imageSrc;
 
-  // Black background (untouched areas)
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, width, height);
 
-  // White areas indicate regions to be modified by FLUX.1 Fill
   ctx.fillStyle = "white";
   ctx.filter = "blur(12px)";
 
@@ -435,25 +432,34 @@ export default function VisualizerApp() {
   const runSimulation = async () => {
     if (!imageSrc) return;
     setIsProcessing(true);
-    setStatusText("Generating mask & querying FLUX.1 Pro Fill engine...");
+    setStatusText("Preparing image blobs & querying FLUX.1 Pro Fill...");
 
     try {
       const maskUrl = await generateMaskForProcedures(imageSrc, selectedProcedures);
 
+      async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        return new File([blob], filename, { type: blob.type });
+      }
+
+      const imageFile = await dataUrlToFile(imageSrc, "baseline.jpg");
+      const maskFile = await dataUrlToFile(maskUrl, "mask.jpg");
+
       const procedureDirectives = selectedProcedures
         .map((id) => {
           const c = configs[id];
-          return `${c.label} (${c.preset} at ${c.intensity}% scale)`;
+          return `${c.label} (${c.preset} at ${c.intensity}% intensity)`;
         })
         .join(", ");
 
-      const promptText = `A professional clinical aesthetic procedure result showing subtle, natural, photorealistic changes for: ${procedureDirectives}. Maintain 100% identity, skin texture, lighting, and background of the original patient portrait.`;
+      const promptText = `Professional clinical aesthetic procedure result showing subtle, natural, photorealistic modifications for: ${procedureDirectives}. Maintain 100% identity, skin texture, lighting, and background of the original patient portrait.`;
 
       const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           prompt: promptText,
-          image_url: imageSrc,
-          mask_url: maskUrl,
+          image_url: imageFile,
+          mask_url: maskFile,
         },
       });
 
@@ -997,7 +1003,7 @@ export default function VisualizerApp() {
                         <div className="border-r border-b border-amber-500/20 flex items-center justify-center text-[10px] font-mono text-amber-400/40">Phi 1.618</div>
                         <div className="border-b border-amber-500/20" />
                         <div className="border-r border-amber-500/20 flex items-start p-1 text-[9px] font-mono text-amber-400/60">Menton</div>
-                        <div className="border-r border-amber-500/20" />
+                        <div className="border-r border-b border-amber-500/20" />
                         <div />
                       </div>
                     )}
