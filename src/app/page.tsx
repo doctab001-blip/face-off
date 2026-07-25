@@ -652,7 +652,7 @@ export default function VisualizerApp() {
 
       const compositePrompt = promptParts.join(" ");
 
-      const result = await fal.subscribe("fal-ai/flux/dev/inpainting", {
+      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           prompt: compositePrompt,
           negative_prompt: "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry",
