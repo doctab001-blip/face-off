@@ -432,10 +432,10 @@ export default function VisualizerApp() {
   const runSimulation = async () => {
     if (!imageSrc) return;
     setIsProcessing(true);
-    setStatusText("Preparing image blobs & querying FLUX.1 Pro Fill...");
+    setStatusText("Uploading assets to Fal CDN & executing FLUX.1 Pro Fill...");
 
     try {
-      const maskUrl = await generateMaskForProcedures(imageSrc, selectedProcedures);
+      const maskUrlData = await generateMaskForProcedures(imageSrc, selectedProcedures);
 
       async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
         const res = await fetch(dataUrl);
@@ -444,7 +444,10 @@ export default function VisualizerApp() {
       }
 
       const imageFile = await dataUrlToFile(imageSrc, "baseline.jpg");
-      const maskFile = await dataUrlToFile(maskUrl, "mask.jpg");
+      const maskFile = await dataUrlToFile(maskUrlData, "mask.jpg");
+
+      const uploadedImageUrl = await fal.storage.upload(imageFile);
+      const uploadedMaskUrl = await fal.storage.upload(maskFile);
 
       const procedureDirectives = selectedProcedures
         .map((id) => {
@@ -458,19 +461,20 @@ export default function VisualizerApp() {
       const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           prompt: promptText,
-          image_url: imageFile,
-          mask_url: maskFile,
+          image_url: uploadedImageUrl,
+          mask_url: uploadedMaskUrl,
         },
       });
 
       if (result.data?.images?.[0]?.url) {
         setResultImage(result.data.images[0].url);
       } else {
-        setResultImage(imageSrc);
+        alert("Simulation returned no image URL.");
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.error("FLUX.1 Pro Fill execution failed:", err);
-      setResultImage(imageSrc);
+      alert(`Simulation Error: ${errorMessage}`);
     }
 
     if (activeFacilityId) {
