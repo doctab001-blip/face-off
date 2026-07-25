@@ -546,7 +546,6 @@ CRITICAL DIRECTIVES:
           prompt: promptText,
           image_url: imageSrc,
           mask_url: imageSrc,
-          enable_safety_checker: true,
         },
       });
 
