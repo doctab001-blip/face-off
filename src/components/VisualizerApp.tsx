@@ -564,10 +564,10 @@ export default function VisualizerApp() {
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
           if (!ctx) return resolve(aiResultUrl);
 
-          // Draw the AI result first; we will punch out non-edited regions next.
+          // Draw the AI result first; keep only the masked edit region next.
           ctx.drawImage(aiImg, 0, 0, width, height);
 
-          // 1) Draw the B/W mask onto a temporary canvas (flat alpha today).
+          // 1) Draw the B/W mask onto a temporary canvas.
           const maskCanvas = document.createElement("canvas");
           maskCanvas.width = width;
           maskCanvas.height = height;
@@ -576,22 +576,19 @@ export default function VisualizerApp() {
           maskCtx.drawImage(maskImg, 0, 0, width, height);
 
           // 2) Map luminance → alpha.
-          // Mask orientation: white = edited region, black = preserve original.
-          // For destination-out we need opacity where we want to erase the AI image
-          // (black/non-edit), so invert luminance into alpha.
+          // White shapes on black = keep AI (opaque); black = erase AI (transparent).
           const maskData = maskCtx.getImageData(0, 0, width, height);
           const pixels = maskData.data;
           for (let i = 0; i < pixels.length; i += 4) {
             const luminance = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-            const alpha = 255 - luminance;
             pixels[i] = 255;
             pixels[i + 1] = 255;
             pixels[i + 2] = 255;
-            pixels[i + 3] = alpha;
+            pixels[i + 3] = luminance;
           }
           maskCtx.putImageData(maskData, 0, 0);
 
-          // 3) Blur the alpha-correct mask, then destination-out + restore original underlay.
+          // 3) Blur the alpha-correct mask, then destination-in to preserve the AI edit region.
           const alphaCanvas = document.createElement("canvas");
           alphaCanvas.width = width;
           alphaCanvas.height = height;
@@ -601,7 +598,7 @@ export default function VisualizerApp() {
           aCtx.drawImage(maskCanvas, 0, 0);
 
           ctx.save();
-          ctx.globalCompositeOperation = "destination-out";
+          ctx.globalCompositeOperation = "destination-in";
           ctx.drawImage(alphaCanvas, 0, 0);
           ctx.globalCompositeOperation = "destination-over";
           ctx.drawImage(origImg, 0, 0, width, height);
