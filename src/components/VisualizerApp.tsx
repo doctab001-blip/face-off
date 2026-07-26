@@ -189,13 +189,15 @@ export default function VisualizerApp() {
 
   // Fixed Bug #4: Cleanup FaceLandmarker instance on unmount
   useEffect(() => {
+    let isCancelled = false;
     let activeLandmarker: FaceLandmarker | null = null;
+
     async function initMediaPipe() {
       try {
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
         );
-        activeLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
             delegate: "CPU",
@@ -203,17 +205,28 @@ export default function VisualizerApp() {
           runningMode: "IMAGE",
           numFaces: 1,
         });
-        setLandmarker(activeLandmarker);
+
+        if (isCancelled) {
+          faceLandmarker.close();
+          return;
+        }
+
+        activeLandmarker = faceLandmarker;
+        setLandmarker(faceLandmarker);
       } catch (err) {
+        if (isCancelled) return;
         console.error("MediaPipe Initialization Error:", err);
         setErrorMessage("Failed to load facial recognition engine.");
       }
     }
+
     initMediaPipe();
 
     return () => {
+      isCancelled = true;
       if (activeLandmarker) {
         activeLandmarker.close();
+        activeLandmarker = null;
       }
     };
   }, []);
@@ -257,6 +270,12 @@ export default function VisualizerApp() {
     // Fixed Bug #3: Use Math.round to avoid clipping facial features
     cropW = Math.max(64, Math.round(cropW / 64) * 64);
     cropH = Math.max(64, Math.round(cropH / 64) * 64);
+
+    // Clamp so the crop canvas never reads past the source image bounds
+    const maxCropW = Math.max(1, origW - cropX);
+    const maxCropH = Math.max(1, origH - cropY);
+    cropW = Math.min(cropW, maxCropW);
+    cropH = Math.min(cropH, maxCropH);
 
     const mapped = pixelLms.map((pt) => ({
       x: pt.x - cropX,
