@@ -1,3 +1,3 @@
-import { createRouteHandler } from "@fal-ai/server-proxy/nextjs";
+import { routeHandler } from "@fal-ai/server-proxy/nextjs";
 
-export const { GET, POST, PUT, DELETE, OPTIONS } = createRouteHandler();
+export const { GET, POST } = routeHandler;
