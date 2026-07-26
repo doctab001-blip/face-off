@@ -20,6 +20,14 @@ export async function POST(request: Request) {
   });
 
   try {
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.includes("multipart/form-data")) {
+      return Response.json(
+        { error: "Expected multipart/form-data file upload." },
+        { status: 400 },
+      );
+    }
+
     const form = await request.formData();
     const file = form.get("file");
 
