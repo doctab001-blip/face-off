@@ -249,14 +249,19 @@ export default function VisualizerApp() {
 
     const img = new Image();
     img.onload = () => {
+      // Exact crop dimensions — no CSS scaling / display offsets
+      const width = img.width;
+      const height = img.height;
+
       const mainCanvas = canvasRef.current!;
-      mainCanvas.width = img.width;
-      mainCanvas.height = img.height;
+      mainCanvas.width = width;
+      mainCanvas.height = height;
       const mainCtx = mainCanvas.getContext("2d");
       if (!mainCtx) return;
 
+      mainCtx.setTransform(1, 0, 0, 1, 0, 0);
       mainCtx.fillStyle = "#000000";
-      mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
+      mainCtx.fillRect(0, 0, width, height);
 
       const upperLipCenter = mappedLandmarks[13];
       const lowerLipCenter = mappedLandmarks[14];
@@ -266,13 +271,16 @@ export default function VisualizerApp() {
           : 0;
 
       const layerCanvas = document.createElement("canvas");
-      layerCanvas.width = img.width;
-      layerCanvas.height = img.height;
+      layerCanvas.width = width;
+      layerCanvas.height = height;
       const layerCtx = layerCanvas.getContext("2d");
+
+      const MASK_STROKE_PX = 35;
 
       selectedFeatures.forEach((feat) => {
         if (!layerCtx) return;
-        layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
+        layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+        layerCtx.clearRect(0, 0, width, height);
         layerCtx.save();
 
         if (feat === "brows") {
@@ -292,10 +300,11 @@ export default function VisualizerApp() {
             }
             layerCtx.closePath();
             layerCtx.fillStyle = "#FFFFFF";
-            layerCtx.fill();
-            layerCtx.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
+            layerCtx.fill("nonzero");
+            layerCtx.lineWidth = Math.max(MASK_STROKE_PX, thicknessConfig.stroke + thicknessConfig.padding);
             layerCtx.strokeStyle = "#FFFFFF";
-            layerCtx.lineJoin = "miter";
+            layerCtx.lineJoin = "round";
+            layerCtx.lineCap = "round";
             layerCtx.stroke();
           });
         } else if (feat === "chin") {
@@ -311,31 +320,31 @@ export default function VisualizerApp() {
             }
             layerCtx.closePath();
             layerCtx.fillStyle = "#FFFFFF";
-            layerCtx.fill();
-            layerCtx.lineWidth = 14;
+            layerCtx.fill("nonzero");
+            layerCtx.lineWidth = MASK_STROKE_PX;
             layerCtx.strokeStyle = "#FFFFFF";
             layerCtx.lineJoin = "round";
+            layerCtx.lineCap = "round";
             layerCtx.stroke();
           }
         } else if (feat === "cheeks") {
-          const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
           layerCtx.filter = "blur(8px)";
-          const shiftY = -8;
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
             layerCtx.beginPath();
             const startPt = mappedLandmarks[cheekIndices[0]];
             if (!startPt) return;
-            layerCtx.moveTo(startPt.x, startPt.y + shiftY);
+            layerCtx.moveTo(startPt.x, startPt.y);
             for (let i = 1; i < cheekIndices.length; i++) {
               const pt = mappedLandmarks[cheekIndices[i]];
-              if (pt) layerCtx.lineTo(pt.x, pt.y + shiftY);
+              if (pt) layerCtx.lineTo(pt.x, pt.y);
             }
             layerCtx.closePath();
             layerCtx.fillStyle = "#FFFFFF";
-            layerCtx.fill();
-            layerCtx.lineWidth = dosageConfig.dilationPx;
+            layerCtx.fill("nonzero");
+            layerCtx.lineWidth = MASK_STROKE_PX;
             layerCtx.strokeStyle = "#FFFFFF";
             layerCtx.lineJoin = "round";
+            layerCtx.lineCap = "round";
             layerCtx.stroke();
           });
         } else if (feat === "nose") {
@@ -351,10 +360,11 @@ export default function VisualizerApp() {
               }
               layerCtx.closePath();
               layerCtx.fillStyle = "#FFFFFF";
-              layerCtx.fill();
-              layerCtx.lineWidth = 10;
+              layerCtx.fill("nonzero");
+              layerCtx.lineWidth = MASK_STROKE_PX;
               layerCtx.strokeStyle = "#FFFFFF";
               layerCtx.lineJoin = "round";
+              layerCtx.lineCap = "round";
               layerCtx.stroke();
             }
           }
@@ -383,20 +393,21 @@ export default function VisualizerApp() {
                 }
               }
               layerCtx.fillStyle = "#FFFFFF";
+              // Mouth opening uses evenodd so the gap stays clear; all other features use nonzero.
               layerCtx.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
-              if (feat.includes("lip")) {
-                const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
-                layerCtx.lineWidth = dosageConfig.dilationPx;
-                layerCtx.strokeStyle = "#FFFFFF";
-                layerCtx.lineJoin = "round";
-                layerCtx.stroke();
-              }
+              layerCtx.lineWidth = MASK_STROKE_PX;
+              layerCtx.strokeStyle = "#FFFFFF";
+              layerCtx.lineJoin = "round";
+              layerCtx.lineCap = "round";
+              layerCtx.stroke();
             }
           }
         }
         layerCtx.restore();
-        mainCtx.drawImage(layerCanvas, 0, 0);
+        mainCtx.drawImage(layerCanvas, 0, 0, width, height);
       });
+
+      console.log("Mask Data URL generated:", mainCanvas.toDataURL());
       setMaskDataUrl(mainCanvas.toDataURL("image/png"));
     };
     img.src = croppedImageSrc;
