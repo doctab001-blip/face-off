@@ -391,7 +391,7 @@ export default function VisualizerApp() {
         })
         .join(", ");
 
-      const promptText = `Professional clinical aesthetic procedure result showing subtle, natural, photorealistic modifications for: ${procedureDirectives}. Maintain 100% identity, skin texture, lighting, and background of the original patient portrait.`;
+      const promptText = `Perfectly natural, photorealistic human portrait. Subtle anatomical refinement: ${procedureDirectives}. Flawless natural skin texture. STRICTLY NO medical instruments, NO surgical tape, NO metal piercings, NO bandages, NO artifacts. Maintain 100% original identity, lighting, and background.`;
 
       const primary = selectedProcedures[0];
       const avgIntensity = Math.round(
