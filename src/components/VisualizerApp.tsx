@@ -22,6 +22,15 @@ import {
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
+type LinePositions = {
+  trichion: number;
+  glabella: number;
+  subnasale: number;
+  menton: number;
+  leftX: number;
+  rightX: number;
+};
+
 export default function VisualizerApp() {
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
 
@@ -42,16 +51,7 @@ export default function VisualizerApp() {
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
 
-  const [linePositions, setLinePositions] = useState<{
-    trichion: number;
-    glabella: number;
-    subnasale: number;
-    menton: number;
-    leftX: number;
-    rightX: number;
-  } | null>(null);
-
-  const [activeDraggingLine, setActiveDraggingLine] = useState<string | null>(null);
+  const [linePositions, setLinePositions] = useState<LinePositions | null>(null);
 
   const [fullFacePhi, setFullFacePhi] = useState<{
     facePhiRatio: string;
@@ -73,14 +73,19 @@ export default function VisualizerApp() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const loadedImageRef = useRef<HTMLImageElement | null>(null);
+  const linePositionsRef = useRef<LinePositions | null>(null);
+  const activeDraggingLineRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    let faceLandmarker: FaceLandmarker | null = null;
+
     async function initMediaPipe() {
       try {
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
         );
-        const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        const created = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
             delegate: "CPU",
@@ -88,12 +93,23 @@ export default function VisualizerApp() {
           runningMode: "IMAGE",
           numFaces: 1,
         });
-        setLandmarker(faceLandmarker);
+        if (cancelled) {
+          created.close();
+          return;
+        }
+        faceLandmarker = created;
+        setLandmarker(created);
       } catch {
-        setErrorMessage("Failed to load facial recognition engine.");
+        if (!cancelled) {
+          setErrorMessage("Failed to load facial recognition engine.");
+        }
       }
     }
     initMediaPipe();
+    return () => {
+      cancelled = true;
+      faceLandmarker?.close();
+    };
   }, []);
 
   const toggleFeature = (feat: FeatureType) => {
@@ -106,7 +122,55 @@ export default function VisualizerApp() {
     }
   };
 
-  const recalculateMetricsFromLines = useCallback((lines: typeof linePositions) => {
+  const drawGoldenRatioOverlay = useCallback((
+    lines: LinePositions | null,
+    activeKey: string | null,
+    show: boolean,
+  ) => {
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!overlayCanvas) return;
+    const oCtx = overlayCanvas.getContext("2d");
+    if (!oCtx) return;
+
+    oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    if (!show || !lines) return;
+
+    const { trichion, glabella, subnasale, menton, leftX, rightX } = lines;
+    const gridLines = [
+      { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
+      { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
+      { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
+      { key: "menton", y: menton, label: "Menton (Chin Tip)" },
+    ];
+
+    gridLines.forEach((line) => {
+      const isDragging = activeKey === line.key;
+      oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
+      oCtx.lineWidth = isDragging ? 3 : 1.5;
+      oCtx.beginPath();
+      oCtx.moveTo(leftX - 25, line.y);
+      oCtx.lineTo(rightX + 25, line.y);
+      oCtx.stroke();
+
+      oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+      oCtx.beginPath();
+      oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
+      oCtx.fill();
+
+      oCtx.font = "10px monospace";
+      oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+      oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
+    });
+
+    oCtx.strokeStyle = "#f59e0b";
+    oCtx.lineWidth = 2;
+    oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
+    oCtx.font = "11px monospace";
+    oCtx.fillStyle = "#fbbf24";
+    oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
+  }, []);
+
+  const recalculateMetricsFromLines = useCallback((lines: LinePositions | null) => {
     if (!lines) return;
 
     const { trichion, glabella, subnasale, menton, leftX, rightX } = lines;
@@ -182,6 +246,7 @@ export default function VisualizerApp() {
     };
 
     setMappedLandmarks(mapped);
+    linePositionsRef.current = initialLines;
     setLinePositions(initialLines);
 
     const cropCanvas = document.createElement("canvas");
@@ -201,6 +266,7 @@ export default function VisualizerApp() {
     setCroppedImageSrc(null);
     setFullFacePhi(null);
     setMappedLandmarks(null);
+    linePositionsRef.current = null;
     setLinePositions(null);
 
     const file = e.target.files?.[0];
@@ -415,53 +481,27 @@ export default function VisualizerApp() {
 
       setMaskDataUrl(mainCanvas.toDataURL("image/png"));
 
-      if (overlayCanvasRef.current && linePositions) {
+      if (overlayCanvasRef.current) {
         const overlayCanvas = overlayCanvasRef.current;
         overlayCanvas.width = img.width;
         overlayCanvas.height = img.height;
-        const oCtx = overlayCanvas.getContext("2d");
-        if (oCtx) {
-          oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
-          if (showGoldenRatio) {
-            const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositions;
-            const lines = [
-              { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
-              { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
-              { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
-              { key: "menton", y: menton, label: "Menton (Chin Tip)" },
-            ];
-
-            lines.forEach((line) => {
-              const isDragging = activeDraggingLine === line.key;
-              oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
-              oCtx.lineWidth = isDragging ? 3 : 1.5;
-              oCtx.beginPath();
-              oCtx.moveTo(leftX - 25, line.y);
-              oCtx.lineTo(rightX + 25, line.y);
-              oCtx.stroke();
-
-              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-              oCtx.beginPath();
-              oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
-              oCtx.fill();
-
-              oCtx.font = "10px monospace";
-              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-              oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
-            });
-
-            oCtx.strokeStyle = "#f59e0b";
-            oCtx.lineWidth = 2;
-            oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
-            oCtx.font = "11px monospace";
-            oCtx.fillStyle = "#fbbf24";
-            oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
-          }
-        }
+        drawGoldenRatioOverlay(
+          linePositionsRef.current,
+          activeDraggingLineRef.current,
+          showGoldenRatio,
+        );
       }
     };
-  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc]);
+  }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc, drawGoldenRatioOverlay]);
+
+  // Redraw grid when toggled or when line state commits (e.g. after drag end)
+  useEffect(() => {
+    drawGoldenRatioOverlay(
+      linePositionsRef.current,
+      activeDraggingLineRef.current,
+      showGoldenRatio,
+    );
+  }, [showGoldenRatio, linePositions, drawGoldenRatioOverlay]);
 
   const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
     if (!croppedImageSrc || !mappedLandmarks) return null;
@@ -598,41 +638,49 @@ export default function VisualizerApp() {
   }, []);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!showGoldenRatio || !linePositions || !overlayCanvasRef.current) return;
+    if (!showGoldenRatio || !linePositionsRef.current || !overlayCanvasRef.current) return;
 
     const rect = overlayCanvasRef.current.getBoundingClientRect();
     const scaleY = overlayCanvasRef.current.height / rect.height;
     const clickY = (e.clientY - rect.top) * scaleY;
 
     const threshold = 14;
-    const keys: Array<keyof typeof linePositions> = ["trichion", "glabella", "subnasale", "menton"];
+    const keys: Array<keyof LinePositions> = ["trichion", "glabella", "subnasale", "menton"];
+    const lines = linePositionsRef.current;
 
     for (const key of keys) {
-      if (Math.abs(linePositions[key] - clickY) < threshold) {
-        setActiveDraggingLine(key);
+      if (Math.abs(lines[key] - clickY) < threshold) {
+        activeDraggingLineRef.current = key;
+        drawGoldenRatioOverlay(lines, key, true);
         break;
       }
     }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!activeDraggingLine || !linePositions || !overlayCanvasRef.current) return;
+    const activeKey = activeDraggingLineRef.current;
+    if (!activeKey || !linePositionsRef.current || !overlayCanvasRef.current) return;
 
     const rect = overlayCanvasRef.current.getBoundingClientRect();
     const scaleY = overlayCanvasRef.current.height / rect.height;
     const newY = (e.clientY - rect.top) * scaleY;
 
-    const updated = {
-      ...linePositions,
-      [activeDraggingLine]: newY,
+    const updated: LinePositions = {
+      ...linePositionsRef.current,
+      [activeKey]: newY,
     };
 
-    setLinePositions(updated);
-    recalculateMetricsFromLines(updated);
+    linePositionsRef.current = updated;
+    drawGoldenRatioOverlay(updated, activeKey, true);
   };
 
   const handleCanvasMouseUp = () => {
-    setActiveDraggingLine(null);
+    if (activeDraggingLineRef.current && linePositionsRef.current) {
+      setLinePositions(linePositionsRef.current);
+      recalculateMetricsFromLines(linePositionsRef.current);
+    }
+    activeDraggingLineRef.current = null;
+    drawGoldenRatioOverlay(linePositionsRef.current, null, showGoldenRatio);
   };
 
   const handleGeneratePreview = async () => {
