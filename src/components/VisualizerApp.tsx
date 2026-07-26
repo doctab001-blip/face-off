@@ -810,67 +810,70 @@ export default function VisualizerApp() {
 
   const handleGeneratePreview = async () => {
     if (!croppedImageSrc || !maskDataUrl) return;
+
     setLoading(true);
     setErrorMessage(null);
 
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
+      let maxStrength = 0.45;
       let targetImage = croppedImageSrc;
 
       if (selectedFeatures.includes("chin")) {
         const chinConfig = CHIN_TECHNIQUES[chinTechnique];
         promptParts.push(chinConfig.prompt_suffix);
+        maxStrength = Math.max(maxStrength, chinConfig.strength);
       }
+
       if (selectedFeatures.includes("cheeks")) {
         const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
         const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
         promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
+        maxStrength = Math.max(maxStrength, cheekDosageConfig.strength);
       }
+
       if (selectedFeatures.includes("brows")) {
         promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
+        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.62);
       }
+
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
+        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.5);
       }
+
       if (selectedFeatures.includes("nose")) {
         const noseConfig = NOSE_TECHNIQUES[noseTechnique];
         promptParts.push(noseConfig.prompt_suffix);
+        maxStrength = Math.max(maxStrength, noseConfig.strength);
 
-        // Your robust pre-warping engine remains completely intact
         const warped = generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
         if (warped) targetImage = warped;
       }
 
-      // We integrate your negative constraints directly into the prompt to ensure the AI respects the boundaries
-      promptParts.push(
-        "Absolutely preserve original skin texture, lighting, and non-targeted anatomy. The image must look completely unedited. Do not add lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, plastic skin, distorted geometry, or asymmetry."
-      );
-
       const compositePrompt = promptParts.join(" ");
 
-      // Updated to the correct, valid Fal.ai endpoint
-      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
+      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
         input: {
           prompt: compositePrompt,
+          negative_prompt:
+            "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
           image_url: targetImage,
           mask_url: maskDataUrl,
+          strength: maxStrength,
+          enable_safety_checker: true,
         },
       });
 
       if (result.data?.images?.[0]?.url) {
         const rawAiUrl = result.data.images[0].url;
-
-        // Your robust alpha edge-feathering post-processor remains completely intact
         const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
         setResultImage(featheredUrl);
       } else {
         setErrorMessage("AI simulation failed to return an image.");
       }
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "Failed to run composite simulation. Please check your network connection.";
+      const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
       setErrorMessage(msg);
     } finally {
       setLoading(false);
