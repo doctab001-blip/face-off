@@ -73,7 +73,7 @@ const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
     features: [
       "Up to 5 Practitioner Accounts",
       "500 HD AI Simulations / month",
-      "FLUX.1 Pro Fill Engine",
+      "FLUX General Inpainting Engine",
       "Custom Facility Logo on PDF Reports",
       "Multi-Mask Layering & Comparison Slider",
       "Priority Clinical Support",
@@ -390,7 +390,7 @@ export default function VisualizerApp() {
 
       setStatusText(
         usedLandmarks
-          ? "Uploading assets to fal CDN & executing FLUX.1 Pro Fill..."
+          ? "Uploading assets to fal CDN & executing FLUX General Inpainting..."
           : "Face landmarks unavailable — using approximate mask. Uploading to fal...",
       );
 
@@ -436,7 +436,7 @@ export default function VisualizerApp() {
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error("FLUX.1 Pro Fill execution failed:", err);
+      console.error("FLUX General Inpainting execution failed:", err);
       alert(`Simulation Error: ${errorMessage}`);
     } finally {
       setIsProcessing(false);
@@ -839,10 +839,10 @@ export default function VisualizerApp() {
                     {isProcessing ? (
                       <span className="flex items-center gap-2">
                         <span className="animate-spin text-sm">✨</span>
-                        <span>Simulating FLUX Pro ({selectedProcedures.length} Procedures)...</span>
+                        <span>Simulating ({selectedProcedures.length} targets)...</span>
                       </span>
                     ) : (
-                      <span>Run FLUX.1 Pro Fill ({selectedProcedures.length} Targets)</span>
+                      <span>Run AI Simulation ({selectedProcedures.length} Targets)</span>
                     )}
                   </button>
                 </div>
