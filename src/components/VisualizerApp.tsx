@@ -257,6 +257,14 @@ export default function VisualizerApp() {
   }, [mappedLandmarks, selectedFeatures, croppedImageSrc]);
 
   const handleGeneratePreview = async () => {
+    console.log(
+      "--- SIMULATION TRIGGERED --- | Image:",
+      !!croppedImageSrc,
+      "| Mask:",
+      !!maskDataUrl,
+      "| Features:",
+      selectedFeatures,
+    );
     try {
       // 1. Strict Guardrails with UI Feedback
       if (!croppedImageSrc) {
@@ -532,7 +540,13 @@ export default function VisualizerApp() {
         </div>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end">
+        {/* Diagnostic Error Banner */}
+        {errorMessage && (
+          <div className="w-full max-w-xl mx-auto mb-4 p-4 bg-red-950/80 border-l-4 border-red-500 rounded text-red-200 text-sm font-mono shadow-lg">
+            ⚠️ {errorMessage}
+          </div>
+        )}
         <button
           onClick={handleGeneratePreview}
           disabled={loading}
