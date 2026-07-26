@@ -624,7 +624,7 @@ export default function VisualizerApp() {
     setErrorMessage(null);
     try {
       const promptParts: string[] = ["Clinical aesthetic facial simulation:"];
-      let maxStrength = 0.38;
+      let maxStrength = 0.82;
       let targetImage = croppedImageSrc;
 
       if (selectedFeatures.includes("chin")) {
@@ -640,11 +640,11 @@ export default function VisualizerApp() {
       }
       if (selectedFeatures.includes("brows")) {
         promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.50);
+        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.84);
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.40);
+        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.82);
       }
       if (selectedFeatures.includes("nose")) {
         const noseConfig = NOSE_TECHNIQUES[noseTechnique];
