@@ -547,99 +547,222 @@ export default function VisualizerApp() {
     return warpCanvas.toDataURL("image/png");
   };
 
-  const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const origImg = new Image();
-      const aiImg = new Image();
-      const maskImg = new Image();
-      let loadedCount = 0;
-      const checkLoaded = () => {
-        loadedCount++;
-        if (loadedCount === 3) {
+  const applyEdgeFeathering = useCallback(
+    (originalSrc: string, aiResultUrl: string, _maskUrl: string): Promise<string> => {
+      return new Promise((resolve) => {
+        if (!mappedLandmarks) {
+          resolve(aiResultUrl);
+          return;
+        }
+
+        const landmarks = mappedLandmarks;
+        const origImg = new Image();
+        const aiImg = new Image();
+        let loadedCount = 0;
+
+        const drawLandmarkClipShapes = (target: CanvasRenderingContext2D) => {
+          const upperLipCenter = landmarks[13];
+          const lowerLipCenter = landmarks[14];
+          const mouthGap =
+            upperLipCenter && lowerLipCenter
+              ? Math.hypot(lowerLipCenter.x - upperLipCenter.x, lowerLipCenter.y - upperLipCenter.y)
+              : 0;
+
+          const fillPoly = (indices: number[], shiftY = 0) => {
+            const startPt = landmarks[indices[0]];
+            if (!startPt) return;
+            target.beginPath();
+            target.moveTo(startPt.x, startPt.y + shiftY);
+            for (let i = 1; i < indices.length; i++) {
+              const pt = landmarks[indices[i]];
+              if (pt) target.lineTo(pt.x, pt.y + shiftY);
+            }
+            target.closePath();
+            target.fillStyle = "#ffffff";
+            target.fill();
+            target.strokeStyle = "#ffffff";
+            target.lineJoin = "round";
+            target.stroke();
+          };
+
+          selectedFeatures.forEach((feat) => {
+            if (feat === "brows") {
+              const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
+              const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
+              const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP.medium;
+              [leftBrow, rightBrow].forEach((browIndices) => {
+                const startPt = landmarks[browIndices[0]];
+                if (!startPt) return;
+                target.beginPath();
+                target.moveTo(startPt.x, startPt.y);
+                for (let i = 1; i < browIndices.length; i++) {
+                  const pt = landmarks[browIndices[i]];
+                  if (pt) target.lineTo(pt.x, pt.y);
+                }
+                target.closePath();
+                target.fillStyle = "#ffffff";
+                target.fill();
+                target.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
+                target.strokeStyle = "#ffffff";
+                target.lineJoin = "miter";
+                target.stroke();
+              });
+            } else if (feat === "chin") {
+              target.lineWidth = 14;
+              fillPoly(CHIN_LANDMARKS);
+            } else if (feat === "cheeks") {
+              const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+              target.lineWidth = dosageConfig.dilationPx;
+              fillPoly(CHEEK_LANDMARKS.left, -8);
+              fillPoly(CHEEK_LANDMARKS.right, -8);
+            } else if (feat === "nose") {
+              target.lineWidth = 12;
+              fillPoly(NOSE_LANDMARKS);
+            } else {
+              const indices = FEATURE_INDICES[feat];
+              if (!indices?.length) return;
+              const startPt = landmarks[indices[0]];
+              if (!startPt) return;
+              target.beginPath();
+              target.moveTo(startPt.x, startPt.y);
+              for (let i = 1; i < indices.length; i++) {
+                const pt = landmarks[indices[i]];
+                if (pt) target.lineTo(pt.x, pt.y);
+              }
+              target.closePath();
+              if (feat.includes("lip") && mouthGap > 6) {
+                const innerStart = landmarks[LIPS_INNER_INDICES[0]];
+                if (innerStart) {
+                  target.moveTo(innerStart.x, innerStart.y);
+                  for (let j = 1; j < LIPS_INNER_INDICES.length; j++) {
+                    const innerPt = landmarks[LIPS_INNER_INDICES[j]];
+                    if (innerPt) target.lineTo(innerPt.x, innerPt.y);
+                  }
+                  target.closePath();
+                }
+              }
+              target.fillStyle = "#ffffff";
+              target.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
+              if (feat.includes("lip")) {
+                const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
+                target.lineWidth = dosageConfig.dilationPx;
+                target.strokeStyle = "#ffffff";
+                target.lineJoin = "round";
+                target.stroke();
+              }
+            }
+          });
+        };
+
+        const buildClipPath = (): Path2D => {
+          const path = new Path2D();
+          const appendPoly = (indices: number[], shiftY = 0) => {
+            const startPt = landmarks[indices[0]];
+            if (!startPt) return;
+            path.moveTo(startPt.x, startPt.y + shiftY);
+            for (let i = 1; i < indices.length; i++) {
+              const pt = landmarks[indices[i]];
+              if (pt) path.lineTo(pt.x, pt.y + shiftY);
+            }
+            path.closePath();
+          };
+
+          selectedFeatures.forEach((feat) => {
+            if (feat === "brows") {
+              appendPoly([70, 63, 105, 66, 107, 55, 65, 52, 53, 46]);
+              appendPoly([300, 293, 334, 296, 336, 285, 295, 282, 283, 276]);
+            } else if (feat === "chin") {
+              appendPoly(CHIN_LANDMARKS);
+            } else if (feat === "cheeks") {
+              appendPoly(CHEEK_LANDMARKS.left, -8);
+              appendPoly(CHEEK_LANDMARKS.right, -8);
+            } else if (feat === "nose") {
+              appendPoly(NOSE_LANDMARKS);
+            } else {
+              const indices = FEATURE_INDICES[feat];
+              if (indices?.length) appendPoly(indices);
+            }
+          });
+
+          return path;
+        };
+
+        const checkLoaded = () => {
+          loadedCount++;
+          if (loadedCount < 2) return;
+
           const width = origImg.width;
           const height = origImg.height;
-
           const canvas = document.createElement("canvas");
           canvas.width = width;
           canvas.height = height;
-          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          const ctx = canvas.getContext("2d");
           if (!ctx) return resolve(aiResultUrl);
 
-          // Soft luminance mask only — never paint mask RGB into the result (avoids dark burn halos).
-          const maskCanvas = document.createElement("canvas");
-          maskCanvas.width = width;
-          maskCanvas.height = height;
-          const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
-          if (!maskCtx) return resolve(aiResultUrl);
-          maskCtx.drawImage(maskImg, 0, 0, width, height);
+          // 1) Original portrait as the clinical base — never touched by mask RGB.
+          ctx.drawImage(origImg, 0, 0, width, height);
+
+          // 2) White-only clip matte via landmark Path2D + ctx.clip() (transparent outside; never black RGB).
+          const clipPath = buildClipPath();
+          const shapeCanvas = document.createElement("canvas");
+          shapeCanvas.width = width;
+          shapeCanvas.height = height;
+          const shapeCtx = shapeCanvas.getContext("2d");
+          if (!shapeCtx) return resolve(aiResultUrl);
+          shapeCtx.save();
+          shapeCtx.clip(clipPath);
+          shapeCtx.fillStyle = "#ffffff";
+          shapeCtx.fillRect(0, 0, width, height);
+          shapeCtx.restore();
+          // Extra stroke coverage for brows/lips (still white-only on transparent).
+          drawLandmarkClipShapes(shapeCtx);
 
           const softPass1 = document.createElement("canvas");
           softPass1.width = width;
           softPass1.height = height;
           const soft1Ctx = softPass1.getContext("2d");
           if (!soft1Ctx) return resolve(aiResultUrl);
-          soft1Ctx.filter = "blur(32px)";
-          soft1Ctx.drawImage(maskCanvas, 0, 0);
+          soft1Ctx.filter = "blur(24px)";
+          soft1Ctx.drawImage(shapeCanvas, 0, 0);
 
-          const softMask = document.createElement("canvas");
-          softMask.width = width;
-          softMask.height = height;
-          const softCtx = softMask.getContext("2d", { willReadFrequently: true });
+          const softClipMatte = document.createElement("canvas");
+          softClipMatte.width = width;
+          softClipMatte.height = height;
+          const softCtx = softClipMatte.getContext("2d");
           if (!softCtx) return resolve(aiResultUrl);
-          softCtx.filter = "blur(20px)";
+          softCtx.filter = "blur(16px)";
           softCtx.drawImage(softPass1, 0, 0);
 
-          const origCanvas = document.createElement("canvas");
-          origCanvas.width = width;
-          origCanvas.height = height;
-          const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
-          if (!origCtx) return resolve(aiResultUrl);
-          origCtx.drawImage(origImg, 0, 0, width, height);
-
-          const aiCanvas = document.createElement("canvas");
-          aiCanvas.width = width;
-          aiCanvas.height = height;
-          const aiCtx = aiCanvas.getContext("2d", { willReadFrequently: true });
+          // 3) AI inside soft clip matte (alpha only), then source-over the original base.
+          const aiLayer = document.createElement("canvas");
+          aiLayer.width = width;
+          aiLayer.height = height;
+          const aiCtx = aiLayer.getContext("2d");
           if (!aiCtx) return resolve(aiResultUrl);
           aiCtx.drawImage(aiImg, 0, 0, width, height);
+          aiCtx.globalCompositeOperation = "destination-in";
+          aiCtx.drawImage(softClipMatte, 0, 0);
 
-          const origData = origCtx.getImageData(0, 0, width, height);
-          const aiData = aiCtx.getImageData(0, 0, width, height);
-          const maskData = softCtx.getImageData(0, 0, width, height);
-          const outData = ctx.createImageData(width, height);
+          ctx.save();
+          ctx.globalCompositeOperation = "source-over";
+          ctx.drawImage(aiLayer, 0, 0);
+          ctx.restore();
 
-          const o = origData.data;
-          const a = aiData.data;
-          const m = maskData.data;
-          const out = outData.data;
-
-          // Pure black → 0% AI opacity; pure white → 100% AI opacity; grayscale = soft melt.
-          for (let i = 0; i < out.length; i += 4) {
-            const t = (m[i] + m[i + 1] + m[i + 2]) / (3 * 255);
-            out[i] = o[i] * (1 - t) + a[i] * t;
-            out[i + 1] = o[i + 1] * (1 - t) + a[i + 1] * t;
-            out[i + 2] = o[i + 2] * (1 - t) + a[i + 2] * t;
-            out[i + 3] = 255;
-          }
-
-          ctx.putImageData(outData, 0, 0);
           resolve(canvas.toDataURL("image/png"));
-        }
-      };
-      origImg.crossOrigin = "anonymous";
-      aiImg.crossOrigin = "anonymous";
-      maskImg.crossOrigin = "anonymous";
-      origImg.onload = checkLoaded;
-      aiImg.onload = checkLoaded;
-      maskImg.onload = checkLoaded;
-      origImg.onerror = () => resolve(aiResultUrl);
-      aiImg.onerror = () => resolve(aiResultUrl);
-      maskImg.onerror = () => resolve(aiResultUrl);
-      origImg.src = originalSrc;
-      aiImg.src = aiResultUrl;
-      maskImg.src = maskUrl;
-    });
-  }, []);
+        };
+
+        origImg.crossOrigin = "anonymous";
+        aiImg.crossOrigin = "anonymous";
+        origImg.onload = checkLoaded;
+        aiImg.onload = checkLoaded;
+        origImg.onerror = () => resolve(aiResultUrl);
+        aiImg.onerror = () => resolve(aiResultUrl);
+        origImg.src = originalSrc;
+        aiImg.src = aiResultUrl;
+      });
+    },
+    [mappedLandmarks, selectedFeatures, browThickness, cheekDosage, lipDosage]
+  );
 
   const logSimulationErrorDetails = (label: string, err: unknown) => {
     if (err == null) {
