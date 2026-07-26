@@ -229,15 +229,26 @@ export default function VisualizerApp() {
           mainCtx.moveTo(mappedLandmarks[CHIN_LANDMARKS[0]].x, mappedLandmarks[CHIN_LANDMARKS[0]].y);
           CHIN_LANDMARKS.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
           mainCtx.stroke();
-        } else {
+        } else if (feat === "upper_lip" || feat === "lower_lip") {
           const indices = FEATURE_INDICES[feat];
           if (indices) {
-            mainCtx.lineWidth = 35;
+            mainCtx.lineWidth = 12; // Severely reduced from 35 to prevent oral cavity bleed
             mainCtx.beginPath();
             mainCtx.moveTo(mappedLandmarks[indices[0]].x, mappedLandmarks[indices[0]].y);
             indices.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
             mainCtx.stroke();
+            mainCtx.fillStyle = "#FFFFFF";
             mainCtx.fill();
+          }
+        } else {
+          // Fallback for any other future features
+          const indices = FEATURE_INDICES[feat as keyof typeof FEATURE_INDICES];
+          if (indices) {
+            mainCtx.lineWidth = 25;
+            mainCtx.beginPath();
+            mainCtx.moveTo(mappedLandmarks[indices[0]].x, mappedLandmarks[indices[0]].y);
+            indices.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+            mainCtx.stroke();
           }
         }
       });
@@ -351,12 +362,25 @@ export default function VisualizerApp() {
         if (warped) targetImage = warped;
       }
 
-      const compositePrompt = promptParts.join(" ");
+      let compositePrompt = promptParts.join(" ");
+
+      // Append strict clinical constraints if lips are being modified
+      if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
+        compositePrompt +=
+          ", strictly keep mouth closed, do not show teeth, preserve original jaw and oral posture exactly.";
+      }
+
+      const lipNegative =
+        selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")
+          ? ", open mouth, visible teeth, smiling teeth, oral cavity, tongue, gaping lips, changed jaw posture"
+          : "";
+
       const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
         input: {
           prompt: compositePrompt,
           negative_prompt:
-            "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
+            "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth" +
+            lipNegative,
           image_url: targetImage,
           mask_url: maskDataUrl,
           strength: maxStrength,
