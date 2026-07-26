@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
 import {
-  LIPS_INNER_INDICES,
   FEATURE_INDICES,
   NOSE_LANDMARKS,
   CHEEK_LANDMARKS,
@@ -16,7 +15,6 @@ import {
   BROW_TECHNIQUES,
   LIP_TECHNIQUES,
   DOSAGE_MAP,
-  BROW_THICKNESS_MAP,
   type FeatureType,
 } from "./constants";
 
