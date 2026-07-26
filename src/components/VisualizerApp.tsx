@@ -36,7 +36,6 @@ export default function VisualizerApp() {
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
-  const [sliderPos, setSliderPos] = useState<number>(50);
 
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
   const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
@@ -986,50 +985,39 @@ export default function VisualizerApp() {
             )}
           </div>
 
-          <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
+          <div className="w-full mx-auto mt-4">
             {resultImage ? (
-              <div className="relative w-full aspect-square select-none touch-none">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
-                <div className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${sliderPos}%` }}>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="relative aspect-[4/5] rounded-lg overflow-hidden border border-gray-800 bg-black">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={croppedImageSrc}
                     alt="Before"
-                    className="absolute top-0 left-0 h-full w-full object-cover max-w-none"
-                    style={{ width: "100%", height: "100%" }}
+                    className="absolute inset-0 w-full h-full object-cover"
                   />
+                  <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono shadow-md">
+                    BEFORE
+                  </span>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={sliderPos}
-                  onChange={(e) => setSliderPos(Number(e.target.value))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
-                />
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10 pointer-events-none shadow-[0_0_12px_rgba(251,191,36,0.8)]"
-                  style={{ left: `${sliderPos}%` }}
-                >
-                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-amber-400 text-gray-950 rounded-full flex items-center justify-center font-bold text-xs shadow-lg">
-                    ↔
-                  </div>
+                <div className="relative aspect-[4/5] rounded-lg overflow-hidden border border-gray-800 bg-black">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={resultImage}
+                    alt="After"
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                  <span className="absolute bottom-3 right-3 bg-amber-500 text-black text-xs px-2.5 py-1 rounded font-bold font-mono shadow-md">
+                    AFTER ({selectedFeatures.join(" + ").toUpperCase()})
+                  </span>
                 </div>
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono">
-                  BEFORE
-                </span>
-                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono">
-                  AFTER ({selectedFeatures.join(" + ").toUpperCase()})
-                </span>
               </div>
             ) : (
-              <div className="relative w-full aspect-square">
+              <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800 bg-black">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={croppedImageSrc}
                   alt="Interactive Canvas"
-                  className="w-full h-full object-cover pointer-events-none"
+                  className="w-full h-auto object-contain pointer-events-none"
                 />
                 <canvas
                   ref={overlayCanvasRef}
