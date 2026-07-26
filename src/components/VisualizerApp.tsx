@@ -285,11 +285,8 @@ export default function VisualizerApp() {
       setLoading(true);
       setResultImage(null);
 
-      // 3. Dynamic Strength Calibration
+      // 3. Setup Clinical Prompting
       const hasLips = selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip");
-      const clinicalStrength = hasLips ? 0.6 : 0.72;
-
-      // 4. Strict Clinical Prompting (Negatives baked into positive prompt)
       let aiPrompt = `Subtle, highly realistic clinical modification: ${selectedFeatures.join(", ")}. `;
       aiPrompt +=
         "Absolutely preserve the exact original skin tone, original lighting, and natural skin pores. The image must look completely unedited. Do not add makeup, do not smooth the skin, do not airbrush. ";
@@ -299,21 +296,17 @@ export default function VisualizerApp() {
           "Keep lips natural. The mouth must remain strictly closed. Do not show teeth. Prevent exaggerated volume and preserve the original jawline perfectly.";
       }
 
-      // 5. API Execution (Strictly valid Flux parameters only)
-      // fal client types omit mask_url for img2img; runtime payload keeps clinical mask targeting.
-      const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
+      // 4. API Execution (Dedicated Inpainting Endpoint)
+      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           image_url: croppedImageSrc,
           mask_url: maskDataUrl,
           prompt: aiPrompt,
-          strength: clinicalStrength,
-          guidance_scale: 7.5,
-          num_inference_steps: 28,
-        } as never,
+        },
         logs: true,
       });
 
-      // 6. Response Handling
+      // 5. Response Handling
       if (result.data?.images?.[0]?.url) {
         setResultImage(result.data.images[0].url);
       } else {
