@@ -556,18 +556,19 @@ export default function VisualizerApp() {
       const checkLoaded = () => {
         loadedCount++;
         if (loadedCount === 3) {
-          const canvas = document.createElement("canvas");
           const width = origImg.width;
           const height = origImg.height;
+
+          const canvas = document.createElement("canvas");
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
           if (!ctx) return resolve(aiResultUrl);
 
-          // Draw the AI result first; keep only the masked edit region next.
-          ctx.drawImage(aiImg, 0, 0, width, height);
+          // 1) Original portrait as the unbroken clinical base layer.
+          ctx.drawImage(origImg, 0, 0, width, height);
 
-          // 1) Draw the B/W mask onto a temporary canvas.
+          // 2) Build a true alpha mask from B/W luminance (white = keep AI, black = transparent).
           const maskCanvas = document.createElement("canvas");
           maskCanvas.width = width;
           maskCanvas.height = height;
@@ -575,8 +576,6 @@ export default function VisualizerApp() {
           if (!maskCtx) return resolve(aiResultUrl);
           maskCtx.drawImage(maskImg, 0, 0, width, height);
 
-          // 2) Map luminance → alpha.
-          // White shapes on black = keep AI (opaque); black = erase AI (transparent).
           const maskData = maskCtx.getImageData(0, 0, width, height);
           const pixels = maskData.data;
           for (let i = 0; i < pixels.length; i += 4) {
@@ -588,21 +587,39 @@ export default function VisualizerApp() {
           }
           maskCtx.putImageData(maskData, 0, 0);
 
-          // 3) Blur the alpha-correct mask, then destination-in to preserve the AI edit region.
-          const alphaCanvas = document.createElement("canvas");
-          alphaCanvas.width = width;
-          alphaCanvas.height = height;
-          const aCtx = alphaCanvas.getContext("2d");
-          if (!aCtx) return resolve(aiResultUrl);
-          aCtx.filter = "blur(16px)";
-          aCtx.drawImage(maskCanvas, 0, 0);
+          // Heavily blur so AI edges melt into surrounding skin (no hard cutoffs).
+          const softMaskPass1 = document.createElement("canvas");
+          softMaskPass1.width = width;
+          softMaskPass1.height = height;
+          const soft1Ctx = softMaskPass1.getContext("2d");
+          if (!soft1Ctx) return resolve(aiResultUrl);
+          soft1Ctx.filter = "blur(28px)";
+          soft1Ctx.drawImage(maskCanvas, 0, 0);
+
+          // Second pass softens residual stair-steps from the landmark polygon.
+          const softMask = document.createElement("canvas");
+          softMask.width = width;
+          softMask.height = height;
+          const softCtx = softMask.getContext("2d");
+          if (!softCtx) return resolve(aiResultUrl);
+          softCtx.filter = "blur(18px)";
+          softCtx.drawImage(softMaskPass1, 0, 0);
+
+          // 3) AI layer clipped by the soft feather mask, then blended over the original.
+          const aiLayer = document.createElement("canvas");
+          aiLayer.width = width;
+          aiLayer.height = height;
+          const aiCtx = aiLayer.getContext("2d");
+          if (!aiCtx) return resolve(aiResultUrl);
+          aiCtx.drawImage(aiImg, 0, 0, width, height);
+          aiCtx.globalCompositeOperation = "destination-in";
+          aiCtx.drawImage(softMask, 0, 0);
 
           ctx.save();
-          ctx.globalCompositeOperation = "destination-in";
-          ctx.drawImage(alphaCanvas, 0, 0);
-          ctx.globalCompositeOperation = "destination-over";
-          ctx.drawImage(origImg, 0, 0, width, height);
+          ctx.globalCompositeOperation = "source-over";
+          ctx.drawImage(aiLayer, 0, 0);
           ctx.restore();
+
           resolve(canvas.toDataURL("image/png"));
         }
       };
