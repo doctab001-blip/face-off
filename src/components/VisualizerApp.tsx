@@ -312,55 +312,6 @@ export default function VisualizerApp() {
     [croppedImageSrc, mappedLandmarks],
   );
 
-  const applyEdgeFeathering = useCallback(
-    (originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
-      return new Promise((resolve) => {
-        const loadImage = (src: string): Promise<HTMLImageElement> => {
-          return new Promise((res, rej) => {
-            const img = new Image();
-            if (src.startsWith("http")) img.crossOrigin = "anonymous";
-            img.onload = () => res(img);
-            img.onerror = (e) => rej(e);
-            img.src = src;
-          });
-        };
-
-        Promise.all([loadImage(originalSrc), loadImage(aiResultUrl), loadImage(maskUrl)])
-          .then(([origImg, aiImg, maskImg]) => {
-            const canvas = document.createElement("canvas");
-            const width = origImg.width;
-            const height = origImg.height;
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return resolve(aiResultUrl);
-
-            ctx.drawImage(aiImg, 0, 0, width, height);
-
-            const alphaCanvas = document.createElement("canvas");
-            alphaCanvas.width = width;
-            alphaCanvas.height = height;
-            const aCtx = alphaCanvas.getContext("2d");
-            if (!aCtx) return resolve(aiResultUrl);
-
-            aCtx.filter = "blur(14px)";
-            aCtx.drawImage(maskImg, 0, 0, width, height);
-
-            ctx.save();
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.drawImage(alphaCanvas, 0, 0);
-            ctx.globalCompositeOperation = "destination-over";
-            ctx.drawImage(origImg, 0, 0, width, height);
-            ctx.restore();
-
-            resolve(canvas.toDataURL("image/png"));
-          })
-          .catch(() => resolve(aiResultUrl));
-      });
-    },
-    [],
-  );
-
   const handleGeneratePreview = async () => {
     if (!croppedImageSrc || !maskDataUrl) {
       setErrorMessage("Missing baseline image or feature mask.");
@@ -414,9 +365,7 @@ export default function VisualizerApp() {
       });
 
       if (result.data?.images?.[0]?.url) {
-        const rawAiUrl = result.data.images[0].url;
-        const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
-        setResultImage(featheredUrl);
+        setResultImage(result.data.images[0].url);
       } else {
         setErrorMessage("AI simulation failed to return an image.");
       }
