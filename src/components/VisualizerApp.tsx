@@ -565,10 +565,7 @@ export default function VisualizerApp() {
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
           if (!ctx) return resolve(aiResultUrl);
 
-          // 1) Original portrait as the unbroken clinical base layer.
-          ctx.drawImage(origImg, 0, 0, width, height);
-
-          // 2) Build a true alpha mask from B/W luminance (white = keep AI, black = transparent).
+          // Soft luminance mask only — never paint mask RGB into the result (avoids dark burn halos).
           const maskCanvas = document.createElement("canvas");
           maskCanvas.width = width;
           maskCanvas.height = height;
@@ -576,50 +573,56 @@ export default function VisualizerApp() {
           if (!maskCtx) return resolve(aiResultUrl);
           maskCtx.drawImage(maskImg, 0, 0, width, height);
 
-          const maskData = maskCtx.getImageData(0, 0, width, height);
-          const pixels = maskData.data;
-          for (let i = 0; i < pixels.length; i += 4) {
-            const luminance = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-            pixels[i] = 255;
-            pixels[i + 1] = 255;
-            pixels[i + 2] = 255;
-            pixels[i + 3] = luminance;
-          }
-          maskCtx.putImageData(maskData, 0, 0);
-
-          // Heavily blur so AI edges melt into surrounding skin (no hard cutoffs).
-          const softMaskPass1 = document.createElement("canvas");
-          softMaskPass1.width = width;
-          softMaskPass1.height = height;
-          const soft1Ctx = softMaskPass1.getContext("2d");
+          const softPass1 = document.createElement("canvas");
+          softPass1.width = width;
+          softPass1.height = height;
+          const soft1Ctx = softPass1.getContext("2d");
           if (!soft1Ctx) return resolve(aiResultUrl);
-          soft1Ctx.filter = "blur(28px)";
+          soft1Ctx.filter = "blur(32px)";
           soft1Ctx.drawImage(maskCanvas, 0, 0);
 
-          // Second pass softens residual stair-steps from the landmark polygon.
           const softMask = document.createElement("canvas");
           softMask.width = width;
           softMask.height = height;
-          const softCtx = softMask.getContext("2d");
+          const softCtx = softMask.getContext("2d", { willReadFrequently: true });
           if (!softCtx) return resolve(aiResultUrl);
-          softCtx.filter = "blur(18px)";
-          softCtx.drawImage(softMaskPass1, 0, 0);
+          softCtx.filter = "blur(20px)";
+          softCtx.drawImage(softPass1, 0, 0);
 
-          // 3) AI layer clipped by the soft feather mask, then blended over the original.
-          const aiLayer = document.createElement("canvas");
-          aiLayer.width = width;
-          aiLayer.height = height;
-          const aiCtx = aiLayer.getContext("2d");
+          const origCanvas = document.createElement("canvas");
+          origCanvas.width = width;
+          origCanvas.height = height;
+          const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+          if (!origCtx) return resolve(aiResultUrl);
+          origCtx.drawImage(origImg, 0, 0, width, height);
+
+          const aiCanvas = document.createElement("canvas");
+          aiCanvas.width = width;
+          aiCanvas.height = height;
+          const aiCtx = aiCanvas.getContext("2d", { willReadFrequently: true });
           if (!aiCtx) return resolve(aiResultUrl);
           aiCtx.drawImage(aiImg, 0, 0, width, height);
-          aiCtx.globalCompositeOperation = "destination-in";
-          aiCtx.drawImage(softMask, 0, 0);
 
-          ctx.save();
-          ctx.globalCompositeOperation = "source-over";
-          ctx.drawImage(aiLayer, 0, 0);
-          ctx.restore();
+          const origData = origCtx.getImageData(0, 0, width, height);
+          const aiData = aiCtx.getImageData(0, 0, width, height);
+          const maskData = softCtx.getImageData(0, 0, width, height);
+          const outData = ctx.createImageData(width, height);
 
+          const o = origData.data;
+          const a = aiData.data;
+          const m = maskData.data;
+          const out = outData.data;
+
+          // Pure black → 0% AI opacity; pure white → 100% AI opacity; grayscale = soft melt.
+          for (let i = 0; i < out.length; i += 4) {
+            const t = (m[i] + m[i + 1] + m[i + 2]) / (3 * 255);
+            out[i] = o[i] * (1 - t) + a[i] * t;
+            out[i + 1] = o[i + 1] * (1 - t) + a[i + 1] * t;
+            out[i + 2] = o[i + 2] * (1 - t) + a[i + 2] * t;
+            out[i + 3] = 255;
+          }
+
+          ctx.putImageData(outData, 0, 0);
           resolve(canvas.toDataURL("image/png"));
         }
       };
