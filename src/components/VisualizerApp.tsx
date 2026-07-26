@@ -31,7 +31,7 @@ export default function VisualizerApp() {
   const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
   const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
-  const [sliderPos, setSliderPos] = useState<number>(50);
+  const [viewMode, setViewMode] = useState<"split" | "before" | "after">("split");
 
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
   const [mappedLandmarks, setMappedLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
@@ -145,6 +145,7 @@ export default function VisualizerApp() {
     setResultImage(null);
     setCroppedImageSrc(null);
     setMappedLandmarks(null);
+    setViewMode("split");
 
     const file = e.target.files?.[0];
     if (!file || !landmarkerRef.current) return;
@@ -657,59 +658,69 @@ export default function VisualizerApp() {
       <canvas ref={canvasRef} className="hidden" />
 
       {croppedImageSrc && (
-        <div>
-          <div className="flex justify-between items-center mb-3">
-            <p className="text-sm font-medium text-amber-200">
-              {resultImage ? "Multi-Procedure Before & After Comparison:" : "Clinical Baseline Preview:"}
-            </p>
-            {resultImage && (
+        <div className="w-full max-w-6xl mx-auto mt-6">
+          {resultImage && (
+            <div className="flex justify-end mb-3">
               <button
                 onClick={handleExportPDF}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition"
               >
                 📄 Export Patient Summary (PDF)
               </button>
-            )}
-          </div>
-
-          <div className="relative w-full max-w-5xl mx-auto overflow-hidden select-none touch-none">
-            {resultImage ? (
-              <>
+            </div>
+          )}
+          <div className={`grid gap-4 ${viewMode === "split" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
+            {/* BEFORE COLUMN */}
+            {(viewMode === "split" || viewMode === "before") && (
+              <div className="relative rounded-xl overflow-hidden border border-gray-800 bg-black group min-h-[400px] flex items-center justify-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={resultImage} alt="After" className="block w-full h-auto" />
-                <div
-                  className="absolute inset-0 overflow-hidden"
-                  style={{ clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={croppedImageSrc} alt="Before" className="absolute inset-0 w-full h-full object-cover" />
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={sliderPos}
-                  onChange={(e) => setSliderPos(Number(e.target.value))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
-                />
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10 pointer-events-none shadow-[0_0_12px_rgba(251,191,36,0.8)]"
-                  style={{ left: `${sliderPos}%` }}
-                >
-                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-amber-400 text-gray-950 rounded-full flex items-center justify-center font-bold text-xs shadow-lg">
-                    ↔
-                  </div>
-                </div>
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono z-10">
+                <img src={croppedImageSrc} alt="Before" className="w-full h-auto max-h-[80vh] object-contain" />
+                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded font-mono shadow-md">
                   BEFORE
                 </span>
-                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono z-10">
-                  AFTER ({selectedFeatures.join(" + ").toUpperCase()})
-                </span>
-              </>
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={croppedImageSrc} alt="Clinical Baseline" className="block w-full h-auto" />
+                <button
+                  onClick={() => setViewMode(viewMode === "split" ? "before" : "split")}
+                  className="absolute top-3 right-3 bg-gray-900/80 hover:bg-amber-500 hover:text-black text-gray-300 text-xs font-semibold px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 shadow-lg"
+                >
+                  {viewMode === "split" ? "⤢ Expand" : "⤡ Split View"}
+                </button>
+              </div>
+            )}
+
+            {/* AFTER COLUMN */}
+            {(viewMode === "split" || viewMode === "after") && (
+              <div className="relative rounded-xl overflow-hidden border border-gray-800 bg-gray-950 flex flex-col items-center justify-center min-h-[400px] group">
+                {resultImage ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={resultImage} alt="After" className="w-full h-auto max-h-[80vh] object-contain" />
+                    <span className="absolute bottom-3 right-3 bg-amber-500 text-black text-xs px-3 py-1.5 rounded font-bold font-mono shadow-md">
+                      AFTER (
+                      {selectedFeatures.length > 0
+                        ? selectedFeatures.join(" + ").toUpperCase()
+                        : "SIMULATION"}
+                      )
+                    </span>
+                    <button
+                      onClick={() => setViewMode(viewMode === "split" ? "after" : "split")}
+                      className="absolute top-3 right-3 bg-gray-900/80 hover:bg-amber-500 hover:text-black text-gray-300 text-xs font-semibold px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 shadow-lg"
+                    >
+                      {viewMode === "split" ? "⤢ Expand" : "⤡ Split View"}
+                    </button>
+                  </>
+                ) : (
+                  <div className="text-gray-500 text-sm font-mono text-center px-6">
+                    {loading ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-amber-500">AI Rendering Architecture...</span>
+                      </div>
+                    ) : (
+                      "Select procedures and click 'Run Simulation' to generate clinical results."
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
