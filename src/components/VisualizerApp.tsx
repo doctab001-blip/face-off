@@ -18,7 +18,6 @@ import {
   DOSAGE_MAP,
   BROW_THICKNESS_MAP,
   type FeatureType,
-  type LinePositions,
 } from "./constants";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
@@ -34,32 +33,18 @@ export default function VisualizerApp() {
   const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
   const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
-  const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
-  const [zoomScale, setZoomScale] = useState<number>(100);
   const [sliderPos, setSliderPos] = useState<number>(50);
 
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
-  const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
   const [mappedLandmarks, setMappedLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
-  const [fullFacePhi, setFullFacePhi] = useState<{
-    facePhiRatio: string;
-    verticalThirdsRatio: string;
-    overallScore: string;
-    clinicalAnalysis: string;
-  } | null>(null);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const loadedImageRef = useRef<HTMLImageElement | null>(null);
-
-  const linePositionsRef = useRef<LinePositions | null>(null);
-  const activeDraggingLineRef = useRef<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -97,35 +82,7 @@ export default function VisualizerApp() {
     }
   };
 
-  const recalculateMetricsFromLines = useCallback((lines: LinePositions) => {
-    if (!lines) return;
-    const { trichion, glabella, subnasale, menton, leftX, rightX } = lines;
-    const faceHeight = menton - trichion;
-    const faceWidth = Math.abs(rightX - leftX);
-    const facePhi = faceWidth > 0 ? (faceHeight / faceWidth).toFixed(3) : "1.618";
-
-    const upperThird = Math.abs(glabella - trichion);
-    const middleThird = Math.abs(subnasale - glabella);
-    const lowerThird = Math.abs(menton - subnasale);
-    const avgThird = (upperThird + middleThird + lowerThird) / 3;
-
-    const thirdsRatioStr = `${(upperThird / avgThird).toFixed(2)} : ${(middleThird / avgThird).toFixed(2)} : ${(lowerThird / avgThird).toFixed(2)}`;
-    const phiDiff = Math.abs(parseFloat(facePhi) - 1.618);
-    const overallScore = Math.max(70, Math.min(99, 100 - phiDiff * 30)).toFixed(1);
-
-    let analysis = "Near-Ideal Divine Proportion (Φ 1.618)";
-    if (parseFloat(facePhi) < 1.5) analysis = "Wider Midface Geometry / Brachycephalic";
-    if (parseFloat(facePhi) > 1.75) analysis = "Elongated Facial Height / Dolichocephalic";
-
-    setFullFacePhi({
-      facePhiRatio: facePhi,
-      verticalThirdsRatio: thirdsRatioStr,
-      overallScore: `${overallScore}%`,
-      clinicalAnalysis: analysis,
-    });
-  }, []);
-
-  const updateViewportAndCrop = useCallback((img: HTMLImageElement, pixelLms: Array<{ x: number; y: number }>, scale: number) => {
+  const updateViewportAndCrop = useCallback((img: HTMLImageElement, pixelLms: Array<{ x: number; y: number }>) => {
     const origW = img.width;
     const origH = img.height;
 
@@ -141,16 +98,15 @@ export default function VisualizerApp() {
     const faceWidth = Math.abs(rightCheekX - leftCheekX);
     const faceHeight = Math.abs(calcMentonY - calcTrichionY);
 
-    const scaleMultiplier = scale / 100;
-    const padX = faceWidth * 0.35 * scaleMultiplier;
-    const padTop = faceHeight * 0.25 * scaleMultiplier;
-    const padBottom = faceHeight * 0.25 * scaleMultiplier;
+    const padX = faceWidth * 0.35;
+    const padTop = faceHeight * 0.25;
+    const padBottom = faceHeight * 0.25;
 
     // Source coordinates from original image
     const sourceCropX = Math.max(0, leftCheekX - padX);
     const sourceCropY = Math.max(0, calcTrichionY - padTop);
-    let sourceCropW = Math.min(origW - sourceCropX, faceWidth + padX * 2);
-    let sourceCropH = Math.min(origH - sourceCropY, faceHeight + padTop + padBottom);
+    const sourceCropW = Math.min(origW - sourceCropX, faceWidth + padX * 2);
+    const sourceCropH = Math.min(origH - sourceCropY, faceHeight + padTop + padBottom);
 
     // AI PIPELINE LIMIT: Clamp to ~1 Megapixel (1024px max dimension)
     const MAX_DIMENSION = 1024;
@@ -160,31 +116,20 @@ export default function VisualizerApp() {
     }
 
     // Target Canvas Dimensions (Enforcing PyTorch 64px multiple)
-    let targetCropW = Math.max(64, Math.floor((sourceCropW * downscaleFactor) / 64) * 64);
-    let targetCropH = Math.max(64, Math.floor((sourceCropH * downscaleFactor) / 64) * 64);
-    
+    const targetCropW = Math.max(64, Math.floor((sourceCropW * downscaleFactor) / 64) * 64);
+    const targetCropH = Math.max(64, Math.floor((sourceCropH * downscaleFactor) / 64) * 64);
+
     // Recalculate exact scaling multiplier due to the 64px rounding
     const exactScaleX = targetCropW / sourceCropW;
     const exactScaleY = targetCropH / sourceCropH;
 
     // Scale facial landmarks to match the resized canvas
-    const mapped = pixelLms.map((pt) => ({ 
-      x: (pt.x - sourceCropX) * exactScaleX, 
-      y: (pt.y - sourceCropY) * exactScaleY 
+    const mapped = pixelLms.map((pt) => ({
+      x: (pt.x - sourceCropX) * exactScaleX,
+      y: (pt.y - sourceCropY) * exactScaleY,
     }));
 
-    // Scale draggable grid lines to match the resized canvas
-    const initialLines = {
-      trichion: (calcTrichionY - sourceCropY) * exactScaleY,
-      glabella: (glabellaY - sourceCropY) * exactScaleY,
-      subnasale: (subnasaleY - sourceCropY) * exactScaleY,
-      menton: (calcMentonY - sourceCropY) * exactScaleY,
-      leftX: (leftCheekX - sourceCropX) * exactScaleX,
-      rightX: (rightCheekX - sourceCropX) * exactScaleX,
-    };
-
     setMappedLandmarks(mapped);
-    linePositionsRef.current = initialLines;
 
     const cropCanvas = document.createElement("canvas");
     cropCanvas.width = targetCropW;
@@ -195,17 +140,13 @@ export default function VisualizerApp() {
       cropCtx.drawImage(img, sourceCropX, sourceCropY, sourceCropW, sourceCropH, 0, 0, targetCropW, targetCropH);
       setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
     }
-
-    recalculateMetricsFromLines(initialLines);
-  }, [recalculateMetricsFromLines]);
+  }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMessage(null);
     setResultImage(null);
     setCroppedImageSrc(null);
-    setFullFacePhi(null);
     setMappedLandmarks(null);
-    linePositionsRef.current = null;
 
     const file = e.target.files?.[0];
     if (!file || !landmarkerRef.current) return;
@@ -215,7 +156,6 @@ export default function VisualizerApp() {
       const src = event.target?.result as string;
       const img = new Image();
       img.onload = () => {
-        loadedImageRef.current = img;
         try {
           const results = landmarkerRef.current!.detect(img);
           if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
@@ -224,8 +164,7 @@ export default function VisualizerApp() {
               x: pt.x * img.width,
               y: pt.y * img.height,
             }));
-            setRawPixelLandmarks(pixelLms);
-            updateViewportAndCrop(img, pixelLms, zoomScale);
+            updateViewportAndCrop(img, pixelLms);
           } else {
             setErrorMessage("No face detected. Please upload a clear front-facing portrait.");
           }
@@ -237,12 +176,6 @@ export default function VisualizerApp() {
     };
     reader.readAsDataURL(file);
   };
-
-  useEffect(() => {
-    if (loadedImageRef.current && rawPixelLandmarks) {
-      updateViewportAndCrop(loadedImageRef.current, rawPixelLandmarks, zoomScale);
-    }
-  }, [zoomScale, rawPixelLandmarks, updateViewportAndCrop]);
 
   useEffect(() => {
     if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
@@ -411,95 +344,6 @@ export default function VisualizerApp() {
     chinTechnique,
     croppedImageSrc,
   ]);
-
-  const drawGridOverlay = useCallback(() => {
-    if (!overlayCanvasRef.current || !linePositionsRef.current || !croppedImageSrc) return;
-    const oCtx = overlayCanvasRef.current.getContext("2d");
-    if (!oCtx) return;
-
-    const img = new Image();
-    img.onload = () => {
-      overlayCanvasRef.current!.width = img.width;
-      overlayCanvasRef.current!.height = img.height;
-      oCtx.clearRect(0, 0, img.width, img.height);
-
-      if (showGoldenRatio && linePositionsRef.current) {
-        const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositionsRef.current;
-        const lines = [
-          { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
-          { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
-          { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
-          { key: "menton", y: menton, label: "Menton (Chin Tip)" },
-        ];
-
-        lines.forEach((line) => {
-          const isDragging = activeDraggingLineRef.current === line.key;
-          oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
-          oCtx.lineWidth = isDragging ? 3 : 1.5;
-
-          oCtx.beginPath();
-          oCtx.moveTo(leftX - 25, line.y);
-          oCtx.lineTo(rightX + 25, line.y);
-          oCtx.stroke();
-
-          oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-          oCtx.beginPath();
-          oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
-          oCtx.fill();
-
-          oCtx.font = "10px monospace";
-          oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
-          oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
-        });
-
-        oCtx.strokeStyle = "#f59e0b";
-        oCtx.lineWidth = 2;
-        oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
-        oCtx.font = "11px monospace";
-        oCtx.fillStyle = "#fbbf24";
-        oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
-      }
-    };
-    img.src = croppedImageSrc;
-  }, [showGoldenRatio, croppedImageSrc]);
-
-  useEffect(() => {
-    drawGridOverlay();
-  }, [drawGridOverlay]);
-
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!showGoldenRatio || !linePositionsRef.current || !overlayCanvasRef.current) return;
-    const rect = overlayCanvasRef.current.getBoundingClientRect();
-    const scaleY = overlayCanvasRef.current.height / rect.height;
-    const clickY = (e.clientY - rect.top) * scaleY;
-    const threshold = 14;
-
-    const keys: Array<keyof LinePositions> = ["trichion", "glabella", "subnasale", "menton"];
-    for (const key of keys) {
-      if (Math.abs(linePositionsRef.current[key] - clickY) < threshold) {
-        activeDraggingLineRef.current = key;
-        break;
-      }
-    }
-  };
-
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!activeDraggingLineRef.current || !linePositionsRef.current || !overlayCanvasRef.current) return;
-    const rect = overlayCanvasRef.current.getBoundingClientRect();
-    const scaleY = overlayCanvasRef.current.height / rect.height;
-    const newY = (e.clientY - rect.top) * scaleY;
-
-    linePositionsRef.current = { ...linePositionsRef.current, [activeDraggingLineRef.current]: newY };
-    drawGridOverlay();
-  };
-
-  const handleCanvasMouseUp = () => {
-    if (activeDraggingLineRef.current && linePositionsRef.current) {
-      recalculateMetricsFromLines(linePositionsRef.current);
-    }
-    activeDraggingLineRef.current = null;
-    drawGridOverlay();
-  };
 
   const generateWarpedImage = useCallback(
     (radiusRatio: number, amount: number): string | null => {
@@ -717,19 +561,6 @@ export default function VisualizerApp() {
             <div class="card"><img src="${resultImage}" /><p><strong>AFTER (${procedureList})</strong></p></div>
           </div>
         </div>
-        ${
-          fullFacePhi
-            ? `
-        <div class="section">
-          <h3>Facial Proportion Analysis (Rule of Thirds / Divine Φ)</h3>
-          <div class="metrics">
-            <p>Height/Width Ratio: <strong>${fullFacePhi.facePhiRatio}</strong> (Ideal Φ = 1.618)</p>
-            <p>Vertical Thirds Ratio (Upper : Mid : Lower): <strong>${fullFacePhi.verticalThirdsRatio}</strong></p>
-            <p>Facial Geometry Score: <strong>${fullFacePhi.overallScore}</strong></p>
-          </div>
-        </div>`
-            : ""
-        }
         <div class="disclaimer">
           <strong>Medical Disclaimer:</strong> This visual simulation is provided for consultation and educational purposes only. It does not constitute a surgical guarantee. Final treatment plans depend on in-person clinical assessment by a licensed physician.
         </div>
@@ -742,21 +573,9 @@ export default function VisualizerApp() {
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6 text-white bg-gray-950 min-h-screen select-none">
-      <div className="border-b border-gray-800 pb-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
-          <p className="text-gray-400 text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
-        </div>
-        <button
-          onClick={() => setShowGoldenRatio(!showGoldenRatio)}
-          className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
-            showGoldenRatio
-              ? "bg-indigo-900/50 border-indigo-500 text-indigo-200"
-              : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
-          }`}
-        >
-          {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
-        </button>
+      <div className="border-b border-gray-800 pb-4">
+        <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
+        <p className="text-gray-400 text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
       </div>
 
       {errorMessage && (
@@ -914,48 +733,6 @@ export default function VisualizerApp() {
         </div>
       </div>
 
-      {croppedImageSrc && (
-        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl flex items-center justify-between gap-4 text-xs font-mono">
-          <span className="text-gray-400">Viewport Framing (Zoom Scale):</span>
-          <div className="flex items-center gap-3 flex-1 max-w-xs">
-            <span className="text-gray-500">Zoom In</span>
-            <input
-              type="range"
-              min="50"
-              max="200"
-              value={zoomScale}
-              onChange={(e) => setZoomScale(Number(e.target.value))}
-              className="w-full accent-amber-500 cursor-pointer"
-            />
-            <span className="text-gray-500">Zoom Out</span>
-          </div>
-          <span className="text-amber-400 font-bold min-w-[45px] text-right">{zoomScale}%</span>
-        </div>
-      )}
-
-      {fullFacePhi && (
-        <div className="bg-indigo-950/40 border border-indigo-500/30 p-4 rounded-xl space-y-2 text-xs font-mono">
-          <div className="flex justify-between items-center border-b border-indigo-900/50 pb-2">
-            <span className="text-amber-400 font-bold">FULL FACE RULE OF THIRDS (Φ = 1.618)</span>
-            <span className="text-indigo-300">
-              Divine Match: <strong>{fullFacePhi.overallScore}</strong>
-            </span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300 pt-1">
-            <div>
-              <span className="text-gray-400 block">Height / Width Ratio:</span>
-              <strong className="text-white text-sm">{fullFacePhi.facePhiRatio}</strong>
-              <span className="text-[10px] text-gray-500 block">(Target Φ = 1.618)</span>
-            </div>
-            <div>
-              <span className="text-gray-400 block">Vertical Thirds (Upper : Mid : Lower):</span>
-              <strong className="text-white text-sm">{fullFacePhi.verticalThirdsRatio}</strong>
-              <span className="text-[10px] text-gray-500 block">(Target = 1.0 : 1.0 : 1.0)</span>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex justify-end">
         <button
           onClick={handleGeneratePreview}
@@ -969,12 +746,10 @@ export default function VisualizerApp() {
       <canvas ref={canvasRef} className="hidden" />
 
       {croppedImageSrc && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div>
           <div className="flex justify-between items-center mb-3">
             <p className="text-sm font-medium text-amber-200">
-              {resultImage
-                ? "Multi-Procedure Before & After Comparison:"
-                : "Interactive Facial Canvas (Drag Lines to Adjust):"}
+              {resultImage ? "Multi-Procedure Before & After Comparison:" : "Clinical Baseline Preview:"}
             </p>
             {resultImage && (
               <button
@@ -986,19 +761,17 @@ export default function VisualizerApp() {
             )}
           </div>
 
-          <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
+          <div className="relative w-full max-w-5xl mx-auto overflow-hidden select-none touch-none">
             {resultImage ? (
-              <div className="relative w-full aspect-square select-none touch-none">
+              <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
-                <div className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${sliderPos}%` }}>
+                <img src={resultImage} alt="After" className="block w-full h-auto" />
+                <div
+                  className="absolute inset-0 overflow-hidden"
+                  style={{ clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={croppedImageSrc}
-                    alt="Before"
-                    className="absolute top-0 left-0 h-full w-full object-cover max-w-none"
-                    style={{ width: "100%", height: "100%" }}
-                  />
+                  <img src={croppedImageSrc} alt="Before" className="absolute inset-0 w-full h-full object-cover" />
                 </div>
                 <input
                   type="range"
@@ -1016,30 +789,16 @@ export default function VisualizerApp() {
                     ↔
                   </div>
                 </div>
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono">
+                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono z-10">
                   BEFORE
                 </span>
-                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono">
+                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono z-10">
                   AFTER ({selectedFeatures.join(" + ").toUpperCase()})
                 </span>
-              </div>
+              </>
             ) : (
-              <div className="relative w-full aspect-square">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={croppedImageSrc}
-                  alt="Interactive Canvas"
-                  className="w-full h-full object-cover pointer-events-none"
-                />
-                <canvas
-                  ref={overlayCanvasRef}
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={handleCanvasMouseMove}
-                  onMouseUp={handleCanvasMouseUp}
-                  onMouseLeave={handleCanvasMouseUp}
-                  className="absolute inset-0 w-full h-full cursor-ns-resize"
-                />
-              </div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={croppedImageSrc} alt="Clinical Baseline" className="block w-full h-auto" />
             )}
           </div>
         </div>
