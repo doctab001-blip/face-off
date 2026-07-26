@@ -145,6 +145,7 @@ export default function VisualizerApp() {
     setResultImage(null);
     setCroppedImageSrc(null);
     setMappedLandmarks(null);
+    setViewMode("split");
 
     const file = e.target.files?.[0];
     if (!file || !landmarkerRef.current) return;
