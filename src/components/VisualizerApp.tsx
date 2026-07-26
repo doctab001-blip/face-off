@@ -14,7 +14,6 @@ import {
   CHIN_TECHNIQUES,
   BROW_TECHNIQUES,
   LIP_TECHNIQUES,
-  DOSAGE_MAP,
   type FeatureType,
 } from "./constants";
 
@@ -24,7 +23,6 @@ export default function VisualizerApp() {
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks"]);
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
   const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
-  const [browDensity] = useState<string>("tint_medium");
   const [lipTechnique, setLipTechnique] = useState<keyof typeof LIP_TECHNIQUES>("russian");
   const [lipDosage, setLipDosage] = useState<string>("0.50ml");
   const [noseTechnique, setNoseTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("straight_slim");
@@ -258,71 +256,6 @@ export default function VisualizerApp() {
     img.src = croppedImageSrc;
   }, [mappedLandmarks, selectedFeatures, croppedImageSrc]);
 
-  const generateWarpedImage = useCallback(
-    (radiusRatio: number, amount: number): string | null => {
-      if (!croppedImageSrc || !mappedLandmarks) return null;
-      const img = new Image();
-      img.src = croppedImageSrc;
-      const warpCanvas = document.createElement("canvas");
-      const width = img.width;
-      const height = img.height;
-      warpCanvas.width = width;
-      warpCanvas.height = height;
-      const wCtx = warpCanvas.getContext("2d");
-      if (!wCtx) return croppedImageSrc;
-
-      wCtx.drawImage(img, 0, 0);
-      const srcData = wCtx.getImageData(0, 0, width, height);
-      const dstData = wCtx.createImageData(width, height);
-
-      const noseTip = mappedLandmarks[1];
-      const noseBridgeTop = mappedLandmarks[168];
-      if (!noseTip || !noseBridgeTop) return croppedImageSrc;
-
-      const centerX = noseTip.x;
-      const minY = Math.min(noseBridgeTop.y, noseTip.y) - 10;
-      const maxY = Math.max(noseBridgeTop.y, noseTip.y) + 20;
-
-      const leftAlar = mappedLandmarks[129] || mappedLandmarks[98];
-      const rightAlar = mappedLandmarks[358] || mappedLandmarks[327];
-      const noseWidth = leftAlar && rightAlar ? Math.abs(rightAlar.x - leftAlar.x) : width * 0.25;
-      const radius = noseWidth * (1 + radiusRatio);
-
-      const srcBytes = srcData.data;
-      const dstBytes = dstData.data;
-      dstBytes.set(srcBytes);
-
-      for (let y = Math.floor(minY); y <= Math.ceil(maxY); y++) {
-        if (y < 0 || y >= height) continue;
-        const deltaY = y - (minY + (maxY - minY) * 0.5);
-        const verticalFactor = Math.cos((deltaY / (maxY - minY)) * Math.PI * 0.5);
-        for (let x = Math.floor(centerX - radius); x <= Math.ceil(centerX + radius); x++) {
-          if (x < 0 || x >= width) continue;
-          const deltaX = x - centerX;
-          const dist = Math.abs(deltaX);
-          if (dist < radius) {
-            const normDist = dist / radius;
-            const pinchFactor = Math.exp(-normDist * normDist * 3) * amount * verticalFactor;
-            const srcX = centerX + deltaX * (1 + pinchFactor);
-            const x0 = Math.floor(srcX);
-            const x1 = Math.min(width - 1, x0 + 1);
-            const weight1 = srcX - x0;
-            const weight0 = 1 - weight1;
-            const dstIdx = (y * width + x) * 4;
-            const srcIdx0 = (y * width + x0) * 4;
-            const srcIdx1 = (y * width + x1) * 4;
-            for (let c = 0; c < 3; c++) {
-              dstBytes[dstIdx + c] = srcBytes[srcIdx0 + c] * weight0 + srcBytes[srcIdx1 + c] * weight1;
-            }
-          }
-        }
-      }
-      wCtx.putImageData(dstData, 0, 0);
-      return warpCanvas.toDataURL("image/png");
-    },
-    [croppedImageSrc, mappedLandmarks],
-  );
-
   const handleGeneratePreview = async () => {
     if (!croppedImageSrc || !maskDataUrl) {
       setErrorMessage("Missing baseline image or feature mask.");
@@ -331,61 +264,36 @@ export default function VisualizerApp() {
     setLoading(true);
     setErrorMessage(null);
     try {
-      const promptParts: string[] = ["Clinical aesthetic facial simulation:"];
-      let maxStrength = 0.88;
-      let targetImage = croppedImageSrc;
+      // 1. Dynamic Strength Calibration
+      // Lips require much lower strength to prevent "duck lips". Noses can take slightly more.
+      const hasLips = selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip");
+      const clinicalStrength = hasLips ? 0.6 : 0.72;
 
-      if (selectedFeatures.includes("chin")) {
-        const chinConfig = CHIN_TECHNIQUES[chinTechnique];
-        promptParts.push(chinConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, chinConfig.strength);
-      }
-      if (selectedFeatures.includes("cheeks")) {
-        const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
-        const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-        promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
-        maxStrength = Math.max(maxStrength, cheekDosageConfig.strength);
-      }
-      if (selectedFeatures.includes("brows")) {
-        promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.84);
-      }
-      if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
-        promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.82);
-      }
-      if (selectedFeatures.includes("nose")) {
-        const noseConfig = NOSE_TECHNIQUES[noseTechnique];
-        promptParts.push(noseConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, noseConfig.strength);
-        const warped = generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
-        if (warped) targetImage = warped;
+      // 2. Strict Clinical Prompting
+      let aiPrompt = `Subtle, highly realistic clinical modification: ${selectedFeatures.join(", ")}. `;
+      aiPrompt +=
+        "Absolutely preserve the exact original skin tone, original lighting, and natural skin pores. No makeup, no airbrushing. ";
+
+      if (hasLips) {
+        aiPrompt +=
+          "Keep lips natural, strictly closed mouth, do not show teeth, no exaggerated volume, preserve original jawline perfectly.";
       }
 
-      let compositePrompt = promptParts.join(" ");
+      const negativePrompt =
+        "makeup, smooth skin, plastic, airbrushed, extreme, caricature, exaggerated, duck lips, color shift, changing lighting, changing identity, open mouth, showing teeth, beauty filter, fake";
 
-      // Append strict clinical constraints if lips are being modified
-      if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
-        compositePrompt +=
-          ", strictly keep mouth closed, do not show teeth, preserve original jaw and oral posture exactly.";
-      }
-
-      const lipNegative =
-        selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")
-          ? ", open mouth, visible teeth, smiling teeth, oral cavity, tongue, gaping lips, changed jaw posture"
-          : "";
-
-      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
+      // 3. API Payload Update
+      const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
         input: {
-          prompt: compositePrompt,
-          negative_prompt:
-            "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth" +
-            lipNegative,
-          image_url: targetImage,
+          image_url: croppedImageSrc,
           mask_url: maskDataUrl,
-          strength: maxStrength,
-          enable_safety_checker: true,
+          prompt: aiPrompt,
+          negative_prompt: negativePrompt,
+          strength: clinicalStrength,
+          guidance_scale: 7.5,
+          num_inference_steps: 28,
         },
+        logs: true,
       });
 
       if (result.data?.images?.[0]?.url) {
