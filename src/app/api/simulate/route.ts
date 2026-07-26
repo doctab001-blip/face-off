@@ -1,8 +1,5 @@
 import { fal } from "@fal-ai/client";
-import {
-  INPAINTING_MODEL,
-  INPAINTING_NEGATIVE_PROMPT,
-} from "@/lib/inpainting";
+import { INPAINTING_MODEL } from "@/lib/inpainting";
 import { formatFalError } from "@/lib/falErrors";
 
 export const runtime = "nodejs";
@@ -14,11 +11,6 @@ type SimulateBody = {
   prompt?: string;
   intensity?: number;
 };
-
-function intensityToStrength(intensity: number): number {
-  const normalized = Math.min(100, Math.max(0, intensity)) / 100;
-  return Number((0.55 + normalized * 0.35).toFixed(2));
-}
 
 function dataUrlToBytes(dataUrl: string): {
   bytes: Uint8Array;
@@ -90,17 +82,12 @@ export async function POST(request: Request) {
       uploadBytes(mask.bytes, `mask.${mask.extension}`, mask.contentType),
     ]);
 
+    // fal-ai/flux-pro/v1/fill only accepts a narrow input schema — no negative_prompt/strength.
     const result = await fal.subscribe(INPAINTING_MODEL, {
       input: {
         prompt: body.prompt.trim(),
-        negative_prompt: INPAINTING_NEGATIVE_PROMPT,
         image_url: imageUrl,
         mask_url: maskUrl,
-        strength: intensityToStrength(body.intensity ?? 60),
-        num_inference_steps: 28,
-        guidance_scale: 3.5,
-        output_format: "png",
-        enable_safety_checker: true,
       },
       logs: true,
     });

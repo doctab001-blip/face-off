@@ -73,7 +73,7 @@ const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
     features: [
       "Up to 5 Practitioner Accounts",
       "500 HD AI Simulations / month",
-      "FLUX General Inpainting Engine",
+      "FLUX.1 Pro Fill Engine",
       "Custom Facility Logo on PDF Reports",
       "Multi-Mask Layering & Comparison Slider",
       "Priority Clinical Support",
@@ -392,11 +392,11 @@ export default function VisualizerApp() {
 
       setStatusText(
         usedLandmarks
-          ? "Running secure server-side FLUX General Inpainting..."
-          : "Face landmarks unavailable — using approximate mask. Running server-side inpainting...",
+          ? "Running secure server-side FLUX.1 Pro Fill..."
+          : "Face landmarks unavailable — using approximate mask. Running server-side fill...",
       );
 
-      // Visual-only directives — omit surgical procedure names (e.g. Rhinoplasty)
+      // Visual-only directives — strip surgical trigger words from the AI prompt
       const procedureDirectives = selectedProcedures
         .map((id) => {
           const c = configs[id];
@@ -407,9 +407,10 @@ export default function VisualizerApp() {
             .trim();
           return `${VISUAL_REGION_LABELS[id]}, ${visualPreset}`;
         })
-        .join("; ");
+        .join("; ")
+        .replace(/Filler|Rhinoplasty|Mentoplasty|Procedure/gi, "refinement");
 
-      const promptText = `Perfectly natural photorealistic human portrait showing healed visual anatomy only: ${procedureDirectives}. Clean unbroken natural skin with no marks on the face. Maintain 100% original identity, lighting, clothing, and background.`;
+      const promptText = `High-end clinical photography of a pristine, healed human face. Subtle visual refinement: ${procedureDirectives}. Flawless natural skin texture, perfectly symmetrical. Soft studio lighting, hyperrealistic editorial aesthetic. Maintain 100% original patient identity.`;
 
       const primary = selectedProcedures[0];
       const avgIntensity = Math.round(
@@ -441,7 +442,7 @@ export default function VisualizerApp() {
         err instanceof Error && err.message.trim()
           ? err.message.trim()
           : "Simulation failed with an empty error payload. Check FAL_KEY and try again.";
-      console.error("FLUX General Inpainting execution failed:", err);
+      console.error("FLUX.1 Pro Fill execution failed:", err);
       setSimulationError(errorMessage);
     } finally {
       setIsProcessing(false);
