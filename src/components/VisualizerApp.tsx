@@ -257,19 +257,31 @@ export default function VisualizerApp() {
   }, [mappedLandmarks, selectedFeatures, croppedImageSrc]);
 
   const handleGeneratePreview = async () => {
-    if (!croppedImageSrc || !maskDataUrl) {
-      setErrorMessage("Missing baseline image or feature mask.");
-      return;
-    }
-    setLoading(true);
-    setErrorMessage(null);
     try {
-      // 1. Dynamic Strength Calibration
-      // Lips require much lower strength to prevent "duck lips". Noses can take slightly more.
+      // 1. Strict Guardrails with UI Feedback
+      if (!croppedImageSrc) {
+        setErrorMessage("Upload an image to proceed.");
+        return;
+      }
+      if (selectedFeatures.length === 0) {
+        setErrorMessage("Select at least one procedure target.");
+        return;
+      }
+      if (!maskDataUrl) {
+        setErrorMessage("Facial mapping incomplete. Wait a moment or re-upload the photo.");
+        return;
+      }
+
+      // 2. Initialize Execution State
+      setErrorMessage("");
+      setLoading(true);
+      setResultImage(null);
+
+      // 3. Dynamic Strength Calibration
       const hasLips = selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip");
       const clinicalStrength = hasLips ? 0.6 : 0.72;
 
-      // 2. Strict Clinical Prompting
+      // 4. Strict Clinical Prompting
       let aiPrompt = `Subtle, highly realistic clinical modification: ${selectedFeatures.join(", ")}. `;
       aiPrompt +=
         "Absolutely preserve the exact original skin tone, original lighting, and natural skin pores. No makeup, no airbrushing. ";
@@ -282,7 +294,7 @@ export default function VisualizerApp() {
       const negativePrompt =
         "makeup, smooth skin, plastic, airbrushed, extreme, caricature, exaggerated, duck lips, color shift, changing lighting, changing identity, open mouth, showing teeth, beauty filter, fake";
 
-      // 3. API Payload Update
+      // 5. API Execution
       // fal client types omit mask_url for img2img; runtime payload keeps clinical mask targeting.
       const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
         input: {
@@ -297,14 +309,17 @@ export default function VisualizerApp() {
         logs: true,
       });
 
+      // 6. Response Handling
       if (result.data?.images?.[0]?.url) {
         setResultImage(result.data.images[0].url);
       } else {
-        setErrorMessage("AI simulation failed to return an image.");
+        throw new Error("AI returned an empty payload.");
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to execute simulation.";
-      setErrorMessage(msg);
+      console.error("Simulation Execution Error:", err);
+      const message =
+        err instanceof Error ? err.message : "A network or API error occurred. Check browser console.";
+      setErrorMessage(message);
     } finally {
       setLoading(false);
     }
@@ -520,7 +535,7 @@ export default function VisualizerApp() {
       <div className="flex justify-end">
         <button
           onClick={handleGeneratePreview}
-          disabled={!mappedLandmarks || loading}
+          disabled={loading}
           className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md cursor-pointer"
         >
           {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
