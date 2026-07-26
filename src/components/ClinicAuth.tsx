@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/client";
 
 export default function ClinicAuth() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -22,6 +21,12 @@ export default function ClinicAuth() {
     setMessage(null);
 
     try {
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        throw new Error("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+      }
+
+      const supabase = createClient();
+
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({
           email,
