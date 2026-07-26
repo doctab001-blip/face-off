@@ -1,7 +1,7 @@
 import type { ProcedureId, ProcedureType } from "@/lib/types";
 import { formatFalError } from "@/lib/falErrors";
 
-export const INPAINTING_MODEL = "fal-ai/flux-pro/v1/fill" as const;
+export const INPAINTING_MODEL = "fal-ai/flux-general/inpainting" as const;
 
 export interface InpaintingInput {
   imageUrl: string;

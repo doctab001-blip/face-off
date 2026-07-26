@@ -9,6 +9,8 @@ type SimulateBody = {
   imageDataUrl?: string;
   maskDataUrl?: string;
   prompt?: string;
+  negativePrompt?: string;
+  strength?: number;
   intensity?: number;
 };
 
@@ -82,12 +84,23 @@ export async function POST(request: Request) {
       uploadBytes(mask.bytes, `mask.${mask.extension}`, mask.contentType),
     ]);
 
-    // fal-ai/flux-pro/v1/fill only accepts a narrow input schema — no negative_prompt/strength.
+    const strength =
+      typeof body.strength === "number" && Number.isFinite(body.strength)
+        ? Math.min(1, Math.max(0.05, body.strength))
+        : typeof body.intensity === "number"
+          ? Math.min(1, Math.max(0.05, body.intensity / 100))
+          : 0.45;
+
     const result = await fal.subscribe(INPAINTING_MODEL, {
       input: {
         prompt: body.prompt.trim(),
+        negative_prompt:
+          body.negativePrompt?.trim() ||
+          "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
         image_url: imageUrl,
         mask_url: maskUrl,
+        strength,
+        enable_safety_checker: true,
       },
       logs: true,
     });

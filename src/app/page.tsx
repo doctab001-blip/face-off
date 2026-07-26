@@ -1,7 +1,7 @@
 "use client";
 
-import VisualizerApp from "@/components/VisualizerApp";
+import DashboardApp from "@/components/DashboardApp";
 
 export default function Home() {
-  return <VisualizerApp />;
+  return <DashboardApp />;
 }

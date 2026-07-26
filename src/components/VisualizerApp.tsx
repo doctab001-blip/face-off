@@ -17,7 +17,17 @@ import ControlPanel from "@/components/ControlPanel";
 import ComparisonSlider from "@/components/ComparisonSlider";
 import PhiMetricsDisplay from "@/components/PhiMetricsDisplay";
 
-export default function VisualizerApp() {
+export interface VisualizerAppProps {
+  /** When true, hide standalone brand chrome (used inside DashboardApp). */
+  embedded?: boolean;
+  /** Fired after a successful simulation result is produced. */
+  onSimulationComplete?: () => void;
+}
+
+export default function VisualizerApp({
+  embedded = false,
+  onSimulationComplete,
+}: VisualizerAppProps) {
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks"]);
 
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
@@ -136,6 +146,7 @@ export default function VisualizerApp() {
     lipDosage,
     noseTechnique,
     onError,
+    onSimulationComplete,
   });
 
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,22 +316,43 @@ export default function VisualizerApp() {
     printWindow.document.close();
   };
 
+  const shellClass = embedded
+    ? "space-y-6 text-white select-none"
+    : "max-w-5xl mx-auto p-6 space-y-6 text-white bg-gray-950 min-h-screen select-none";
+
   return (
-    <div className="max-w-5xl mx-auto p-6 space-y-6 text-white bg-gray-950 min-h-screen select-none">
-      <div className="border-b border-gray-800 pb-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
-          <p className="text-gray-400 text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
+    <div className={shellClass}>
+      {!embedded && (
+        <div className="border-b border-gray-800 pb-4 flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
+            <p className="text-gray-400 text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGoldenRatio(!showGoldenRatio)}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
+              showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
+            }`}
+          >
+            {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
+          </button>
         </div>
-        <button
-          onClick={() => setShowGoldenRatio(!showGoldenRatio)}
-          className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
-            showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
-          }`}
-        >
-          {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
-        </button>
-      </div>
+      )}
+
+      {embedded && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowGoldenRatio(!showGoldenRatio)}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
+              showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
+            }`}
+          >
+            {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
+          </button>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-lg text-red-200 text-sm">
@@ -397,11 +429,13 @@ export default function VisualizerApp() {
         />
       )}
 
-      <footer className="text-center pt-6 border-t border-gray-900 text-xs text-gray-500">
-        <p>
-          <strong>Medical Disclaimer:</strong> This tool utilizes generative artificial intelligence for educational and patient consultation purposes only. It does not guarantee surgical or clinical outcomes. Treatment planning requires an in-person clinical consultation with a licensed physician.
-        </p>
-      </footer>
+      {!embedded && (
+        <footer className="text-center pt-6 border-t border-gray-900 text-xs text-gray-500">
+          <p>
+            <strong>Medical Disclaimer:</strong> This tool utilizes generative artificial intelligence for educational and patient consultation purposes only. It does not guarantee surgical or clinical outcomes. Treatment planning requires an in-person clinical consultation with a licensed physician.
+          </p>
+        </footer>
+      )}
     </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { fal } from "@fal-ai/client";
 import {
   NOSE_TECHNIQUES,
   CHEEK_TECHNIQUES,
@@ -12,8 +11,7 @@ import {
   DOSAGE_MAP,
   type FeatureType,
 } from "@/components/constants";
-
-fal.config({ proxyUrl: "/api/fal/proxy" });
+import { formatFalError } from "@/lib/falErrors";
 
 export interface UseFalAIOptions {
   croppedImageSrc: string | null;
@@ -30,6 +28,7 @@ export interface UseFalAIOptions {
   lipDosage: string;
   noseTechnique: keyof typeof NOSE_TECHNIQUES;
   onError: (message: string | null) => void;
+  onSimulationComplete?: () => void;
 }
 
 export function useFalAI({
@@ -47,15 +46,20 @@ export function useFalAI({
   lipDosage,
   noseTechnique,
   onError,
+  onSimulationComplete,
 }: UseFalAIOptions) {
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
-  const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
+  const generateWarpedImage = useCallback(async (radiusRatio: number, amount: number): Promise<string | null> => {
     if (!croppedImageSrc || !mappedLandmarks) return null;
 
-    const img = new Image();
-    img.src = croppedImageSrc;
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Failed to decode image for nose warp."));
+      el.src = croppedImageSrc;
+    });
 
     const warpCanvas = document.createElement("canvas");
     const width = img.width;
@@ -186,7 +190,10 @@ export function useFalAI({
   }, []);
 
   const handleGeneratePreview = useCallback(async () => {
-    if (!croppedImageSrc || !maskDataUrl) return;
+    if (!croppedImageSrc || !maskDataUrl) {
+      onError("Upload a portrait and wait for the procedure mask before running a simulation.");
+      return;
+    }
 
     setLoading(true);
     onError(null);
@@ -224,34 +231,47 @@ export function useFalAI({
         promptParts.push(noseConfig.prompt_suffix);
         maxStrength = Math.max(maxStrength, noseConfig.strength);
 
-        const warped = generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
+        const warped = await generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
         if (warped) targetImage = warped;
       }
 
       const compositePrompt = promptParts.join(" ");
 
-      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
-        input: {
+      const response = await fetch("/api/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageDataUrl: targetImage,
+          maskDataUrl,
           prompt: compositePrompt,
-          negative_prompt: "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
-          image_url: targetImage,
-          mask_url: maskDataUrl,
           strength: maxStrength,
-          enable_safety_checker: true,
-        },
+          negativePrompt:
+            "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
+        }),
       });
 
-      const images = (result.data as { images?: Array<{ url?: string }> } | undefined)?.images;
-      if (images?.[0]?.url) {
-        const rawAiUrl = images[0].url;
-        const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
-        setResultImage(featheredUrl);
-      } else {
-        onError("AI simulation failed to return an image.");
+      let payload: { resultUrl?: string; error?: string } = {};
+      try {
+        payload = (await response.json()) as { resultUrl?: string; error?: string };
+      } catch {
+        // ignore JSON parse errors
       }
+
+      if (!response.ok || !payload.resultUrl) {
+        throw new Error(
+          payload.error || `Simulation request failed (HTTP ${response.status}).`,
+        );
+      }
+
+      const featheredUrl = await applyEdgeFeathering(
+        croppedImageSrc,
+        payload.resultUrl,
+        maskDataUrl,
+      );
+      setResultImage(featheredUrl);
+      onSimulationComplete?.();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
-      onError(msg);
+      onError(formatFalError(err));
     } finally {
       setLoading(false);
     }
@@ -270,6 +290,7 @@ export function useFalAI({
     maskDataUrl,
     noseTechnique,
     onError,
+    onSimulationComplete,
     selectedFeatures,
   ]);
 
