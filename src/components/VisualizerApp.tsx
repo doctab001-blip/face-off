@@ -13,6 +13,9 @@ import {
 import { useMediaPipe } from "@/hooks/useMediaPipe";
 import { useFalAI } from "@/hooks/useFalAI";
 import { useProcedureMask } from "@/hooks/useProcedureMask";
+import ControlPanel from "@/components/ControlPanel";
+import ComparisonSlider from "@/components/ComparisonSlider";
+import PhiMetricsDisplay from "@/components/PhiMetricsDisplay";
 
 export default function VisualizerApp() {
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks"]);
@@ -315,169 +318,27 @@ export default function VisualizerApp() {
         </div>
       )}
 
-      {/* Control Panel */}
-      <div className="bg-gray-900 p-5 rounded-xl border border-gray-800 space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-amber-200 uppercase tracking-wider mb-2">
-            1. Select Target Procedures
-          </label>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-            {[
-              { id: "chin" as const, label: "Chin" },
-              { id: "cheeks" as const, label: "Cheeks" },
-              { id: "nose" as const, label: "Rhinoplasty" },
-              { id: "brows" as const, label: "Eyebrows" },
-              { id: "upper_lip" as const, label: "Upper Lip" },
-              { id: "lower_lip" as const, label: "Lower Lip" },
-            ].map((f) => {
-              const active = selectedFeatures.includes(f.id);
-              return (
-                <button
-                  key={f.id}
-                  onClick={() => toggleFeature(f.id)}
-                  className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition ${
-                    active
-                      ? "bg-amber-600/20 border-amber-500 text-amber-200 font-bold"
-                      : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750"
-                  }`}
-                >
-                  <span>{f.label}</span>
-                  <span className="text-xs">{active ? "✓" : "+"}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Sub-Controls Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-gray-800">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Upload Photo</label>
-            <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm text-gray-300 w-full" />
-          </div>
-
-          {/* Chin Selector */}
-          {selectedFeatures.includes("chin") && (
-            <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Chin Procedure Preset</label>
-              <select
-                value={chinTechnique}
-                onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
-                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
-              >
-                {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
-                  <option key={key} value={key}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Cheek Selector */}
-          {selectedFeatures.includes("cheeks") && (
-            <div className="space-y-2">
-              <label className="block text-xs text-amber-300 font-medium">Cheek Technique & Volume</label>
-              <div className="flex gap-2">
-                <select
-                  value={cheekTechnique}
-                  onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
-                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs flex-1 font-medium"
-                >
-                  {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
-                    <option key={key} value={key}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={cheekDosage}
-                  onChange={(e) => setCheekDosage(e.target.value)}
-                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-28 font-medium"
-                >
-                  <option value="0.50ml">0.50 mL/side</option>
-                  <option value="1.00ml">1.00 mL/side</option>
-                  <option value="1.50ml">1.50 mL/side</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Nose Design Selector */}
-          {selectedFeatures.includes("nose") && (
-            <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Rhinoplasty Preset</label>
-              <select
-                value={noseTechnique}
-                onChange={(e) => setNoseTechnique(e.target.value as keyof typeof NOSE_TECHNIQUES)}
-                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
-              >
-                {Object.entries(NOSE_TECHNIQUES).map(([key, item]) => (
-                  <option key={key} value={key}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Eyebrow Selector */}
-          {selectedFeatures.includes("brows") && (
-            <div className="space-y-2">
-              <label className="block text-xs text-gray-400">Eyebrow Style & Thickness</label>
-              <div className="flex gap-2">
-                <select
-                  value={browTechnique}
-                  onChange={(e) => setBrowTechnique(e.target.value as keyof typeof BROW_TECHNIQUES)}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
-                >
-                  <option value="ombre_powder">Ombré Powder</option>
-                  <option value="microblading">Microblading</option>
-                  <option value="hybrid_tint">Hybrid Tint</option>
-                </select>
-
-                <select
-                  value={browThickness}
-                  onChange={(e) => setBrowThickness(e.target.value as "thin" | "medium" | "thick")}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
-                >
-                  <option value="thin">Thin</option>
-                  <option value="medium">Medium</option>
-                  <option value="thick">Thick</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Lip Selector */}
-          {(selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Lip Technique & Dosage</label>
-              <div className="flex gap-2">
-                <select
-                  value={lipTechnique}
-                  onChange={(e) => setLipTechnique(e.target.value as keyof typeof LIP_TECHNIQUES)}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
-                >
-                  <option value="russian">Russian Lift</option>
-                  <option value="classic_lip">Classic 3D</option>
-                </select>
-                <select
-                  value={lipDosage}
-                  onChange={(e) => setLipDosage(e.target.value)}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
-                >
-                  <option value="0.25ml">0.25ml</option>
-                  <option value="0.50ml">0.50ml</option>
-                  <option value="0.75ml">0.75ml</option>
-                  <option value="1.00ml">1.00ml</option>
-                </select>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      <ControlPanel
+        selectedFeatures={selectedFeatures}
+        onToggleFeature={toggleFeature}
+        onImageUpload={handleImageUpload}
+        chinTechnique={chinTechnique}
+        setChinTechnique={setChinTechnique}
+        cheekTechnique={cheekTechnique}
+        setCheekTechnique={setCheekTechnique}
+        cheekDosage={cheekDosage}
+        setCheekDosage={setCheekDosage}
+        noseTechnique={noseTechnique}
+        setNoseTechnique={setNoseTechnique}
+        browTechnique={browTechnique}
+        setBrowTechnique={setBrowTechnique}
+        browThickness={browThickness}
+        setBrowThickness={setBrowThickness}
+        lipTechnique={lipTechnique}
+        setLipTechnique={setLipTechnique}
+        lipDosage={lipDosage}
+        setLipDosage={setLipDosage}
+      />
 
       {croppedImageSrc && (
         <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl flex items-center justify-between gap-4 text-xs font-mono">
@@ -498,26 +359,7 @@ export default function VisualizerApp() {
         </div>
       )}
 
-      {fullFacePhi && (
-        <div className="bg-indigo-950/40 border border-indigo-500/30 p-4 rounded-xl space-y-2 text-xs font-mono">
-          <div className="flex justify-between items-center border-b border-indigo-900/50 pb-2">
-            <span className="text-amber-400 font-bold">FULL FACE RULE OF THIRDS (Φ = 1.618)</span>
-            <span className="text-indigo-300">Divine Match: <strong>{fullFacePhi.overallScore}</strong></span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300 pt-1">
-            <div>
-              <span className="text-gray-400 block">Height / Width Ratio:</span>
-              <strong className="text-white text-sm">{fullFacePhi.facePhiRatio}</strong>
-              <span className="text-[10px] text-gray-500 block">(Target Φ = 1.618)</span>
-            </div>
-            <div>
-              <span className="text-gray-400 block">Vertical Thirds (Upper : Mid : Lower):</span>
-              <strong className="text-white text-sm">{fullFacePhi.verticalThirdsRatio}</strong>
-              <span className="text-[10px] text-gray-500 block">(Target = 1.0 : 1.0 : 1.0)</span>
-            </div>
-          </div>
-        </div>
-      )}
+      {fullFacePhi && <PhiMetricsDisplay fullFacePhi={fullFacePhi} />}
 
       <div className="flex justify-end">
         <button
@@ -532,80 +374,18 @@ export default function VisualizerApp() {
       <canvas ref={canvasRef} className="hidden" />
 
       {croppedImageSrc && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <div className="flex justify-between items-center mb-3">
-            <p className="text-sm font-medium text-amber-200">
-              {resultImage ? "Multi-Procedure Before & After Comparison:" : "Interactive Facial Canvas (Drag Lines to Adjust):"}
-            </p>
-            {resultImage && (
-              <button
-                onClick={handleExportPDF}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition"
-              >
-                📄 Export Patient Summary (PDF)
-              </button>
-            )}
-          </div>
-
-          <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
-            {resultImage ? (
-              <div className="relative w-full aspect-square select-none touch-none">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
-
-                <div
-                  className="absolute inset-y-0 left-0 overflow-hidden"
-                  style={{ width: `${sliderPos}%` }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={croppedImageSrc}
-                    alt="Before"
-                    className="absolute top-0 left-0 h-full w-full object-cover max-w-none"
-                    style={{ width: "100%", height: "100%" }}
-                  />
-                </div>
-
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={sliderPos}
-                  onChange={(e) => setSliderPos(Number(e.target.value))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
-                />
-
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10 pointer-events-none shadow-[0_0_12px_rgba(251,191,36,0.8)]"
-                  style={{ left: `${sliderPos}%` }}
-                >
-                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-amber-400 text-gray-950 rounded-full flex items-center justify-center font-bold text-xs shadow-lg">
-                    ↔
-                  </div>
-                </div>
-
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono">
-                  BEFORE
-                </span>
-                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono">
-                  AFTER ({selectedFeatures.join(" + ").toUpperCase()})
-                </span>
-              </div>
-            ) : (
-              <div className="relative w-full aspect-square">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-full object-cover pointer-events-none" />
-                <canvas
-                  ref={overlayCanvasRef}
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={handleCanvasMouseMove}
-                  onMouseUp={handleCanvasMouseUp}
-                  className="absolute inset-0 w-full h-full cursor-ns-resize"
-                />
-              </div>
-            )}
-          </div>
-        </div>
+        <ComparisonSlider
+          croppedImageSrc={croppedImageSrc}
+          resultImage={resultImage}
+          selectedFeatures={selectedFeatures}
+          sliderPos={sliderPos}
+          setSliderPos={setSliderPos}
+          overlayCanvasRef={overlayCanvasRef}
+          onCanvasMouseDown={handleCanvasMouseDown}
+          onCanvasMouseMove={handleCanvasMouseMove}
+          onCanvasMouseUp={handleCanvasMouseUp}
+          onExportPDF={handleExportPDF}
+        />
       )}
 
       <footer className="text-center pt-6 border-t border-gray-900 text-xs text-gray-500">
