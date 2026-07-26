@@ -285,15 +285,18 @@ export default function VisualizerApp() {
       setLoading(true);
       setResultImage(null);
 
-      // 3. Setup Clinical Prompting
+      // 3. Setup Holistic Clinical Prompting
       const hasLips = selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip");
-      let aiPrompt = `Subtle, highly realistic clinical modification: ${selectedFeatures.join(", ")}. `;
+      const procedureList = selectedFeatures.join(" and ").replace("_", " ");
+
+      // We must describe the entire scene so the AI blends the inpaint seamlessly into the surrounding face
+      let aiPrompt = `A high-resolution, unedited, photorealistic portrait of a patient. They have undergone a subtle, highly realistic clinical ${procedureList} refinement. `;
       aiPrompt +=
-        "Absolutely preserve the exact original skin tone, original lighting, and natural skin pores. The image must look completely unedited. Do not add makeup, do not smooth the skin, do not airbrush. ";
+        "The modified anatomy seamlessly and flawlessly blends into the surrounding face. The exact original skin tone, ethnic features, natural pores, and room lighting are perfectly preserved. Absolutely no makeup, no airbrushing, and no CGI look. ";
 
       if (hasLips) {
         aiPrompt +=
-          "Keep lips natural. The mouth must remain strictly closed. Do not show teeth. Prevent exaggerated volume and preserve the original jawline perfectly.";
+          "The mouth is naturally closed. No teeth are showing. The lips are incredibly realistic, avoiding any exaggerated volume or 'duck' effect. The original jawline and chin structure remain completely untouched and natural. ";
       }
 
       // 4. API Execution (Dedicated Inpainting Endpoint)
