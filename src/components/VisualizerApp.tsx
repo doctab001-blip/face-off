@@ -283,6 +283,7 @@ export default function VisualizerApp() {
         "makeup, smooth skin, plastic, airbrushed, extreme, caricature, exaggerated, duck lips, color shift, changing lighting, changing identity, open mouth, showing teeth, beauty filter, fake";
 
       // 3. API Payload Update
+      // fal client types omit mask_url for img2img; runtime payload keeps clinical mask targeting.
       const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
         input: {
           image_url: croppedImageSrc,
@@ -292,7 +293,7 @@ export default function VisualizerApp() {
           strength: clinicalStrength,
           guidance_scale: 7.5,
           num_inference_steps: 28,
-        },
+        } as never,
         logs: true,
       });
 
