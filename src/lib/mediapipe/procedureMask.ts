@@ -11,6 +11,15 @@ import type { FacialFeature } from "@/lib/mediapipe/featureIndices";
 import { PROCEDURE_ID_FEATURES, type ProcedureId } from "@/lib/types";
 
 /**
+ * MediaPipe Face Landmarker assets are loaded from external CDNs in
+ * `faceLandmarker.ts` (not from local /public folders):
+ * - FilesetResolver.forVisionTasks:
+ *   https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm
+ * - FaceLandmarker modelAssetPath:
+ *   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+ */
+
+/**
  * Heuristic fallback when MediaPipe cannot detect a face.
  * Uses approximate portrait proportions (not identity-accurate).
  */
