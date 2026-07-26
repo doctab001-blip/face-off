@@ -427,13 +427,25 @@ export default function VisualizerApp() {
         } else if (feat === "nose") {
           layerCtx.filter = "blur(8px)";
           if (NOSE_LANDMARKS && NOSE_LANDMARKS.length > 0) {
-            layerCtx.beginPath();
-            const startPt = mappedLandmarks[NOSE_LANDMARKS[0]];
-            if (startPt) {
-              layerCtx.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < NOSE_LANDMARKS.length; i++) {
-                const pt = mappedLandmarks[NOSE_LANDMARKS[i]];
-                if (pt) layerCtx.lineTo(pt.x, pt.y);
+            // NOSE_LANDMARKS isn't in perimeter order, so connecting the raw
+            // index order self-intersects into a bowtie shape. Sort points by
+            // angle around their centroid to get a simple (non-crossing)
+            // polygon regardless of input order.
+            const noseFillPts = NOSE_LANDMARKS
+              .map((idx) => mappedLandmarks[idx])
+              .filter((pt): pt is { x: number; y: number } => Boolean(pt));
+            if (noseFillPts.length > 2) {
+              const centroid = noseFillPts.reduce(
+                (acc, pt) => ({ x: acc.x + pt.x / noseFillPts.length, y: acc.y + pt.y / noseFillPts.length }),
+                { x: 0, y: 0 },
+              );
+              const orderedPts = [...noseFillPts].sort(
+                (a, b) => Math.atan2(a.y - centroid.y, a.x - centroid.x) - Math.atan2(b.y - centroid.y, b.x - centroid.x),
+              );
+              layerCtx.beginPath();
+              layerCtx.moveTo(orderedPts[0].x, orderedPts[0].y);
+              for (let i = 1; i < orderedPts.length; i++) {
+                layerCtx.lineTo(orderedPts[i].x, orderedPts[i].y);
               }
               layerCtx.closePath();
               layerCtx.fillStyle = "white";
