@@ -21,7 +21,8 @@ const CHEEK_LANDMARKS = {
   right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 447, 340, 266, 371, 329],
 };
 
-const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 18, 132, 58, 172, 136, 150, 149, 176, 148, 152];
+// Fixed Bug #2: Removed duplicate index 18
+const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 132, 58, 172, 136, 150, 149, 176, 148];
 
 const NOSE_TECHNIQUES = {
   straight_slim: {
@@ -186,13 +187,15 @@ export default function VisualizerApp() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const loadedImageRef = useRef<HTMLImageElement | null>(null);
 
+  // Fixed Bug #4: Cleanup FaceLandmarker instance on unmount
   useEffect(() => {
+    let activeLandmarker: FaceLandmarker | null = null;
     async function initMediaPipe() {
       try {
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
         );
-        const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        activeLandmarker = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
             delegate: "CPU",
@@ -200,12 +203,19 @@ export default function VisualizerApp() {
           runningMode: "IMAGE",
           numFaces: 1,
         });
-        setLandmarker(faceLandmarker);
-      } catch {
+        setLandmarker(activeLandmarker);
+      } catch (err) {
+        console.error("MediaPipe Initialization Error:", err);
         setErrorMessage("Failed to load facial recognition engine.");
       }
     }
     initMediaPipe();
+
+    return () => {
+      if (activeLandmarker) {
+        activeLandmarker.close();
+      }
+    };
   }, []);
 
   const toggleFeature = (feat: FeatureType) => {
@@ -243,9 +253,10 @@ export default function VisualizerApp() {
     let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
     let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
 
-    // Enforce 64px multiple to prevent PyTorch 422 shape mismatch errors
-    cropW = Math.max(64, Math.floor(cropW / 64) * 64);
-    cropH = Math.max(64, Math.floor(cropH / 64) * 64);
+    // Round to nearest 64px multiple rather than flooring down
+    // Fixed Bug #3: Use Math.round to avoid clipping facial features
+    cropW = Math.max(64, Math.round(cropW / 64) * 64);
+    cropH = Math.max(64, Math.round(cropH / 64) * 64);
 
     const mapped = pixelLms.map((pt) => ({
       x: pt.x - cropX,
@@ -294,7 +305,8 @@ export default function VisualizerApp() {
           } else {
             setErrorMessage("No face detected. Upload a front-facing portrait.");
           }
-        } catch {
+        } catch (err) {
+          console.error("Facial Geometry Detection Error:", err);
           setErrorMessage("Failed to analyze facial geometry.");
         }
       };
@@ -456,10 +468,14 @@ export default function VisualizerApp() {
     };
   }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, croppedImageSrc]);
 
-  const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
+  // Fixed Bug #1: Made generateWarpedImage async with explicit img.decode() promise
+  const generateWarpedImage = async (radiusRatio: number, amount: number): Promise<string | null> => {
     if (!croppedImageSrc || !mappedLandmarks) return null;
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.src = croppedImageSrc;
+    await img.decode();
+
     const warpCanvas = document.createElement("canvas");
     const width = img.width;
     const height = img.height;
@@ -510,7 +526,7 @@ export default function VisualizerApp() {
     }
     wCtx.putImageData(dstData, 0, 0);
     return warpCanvas.toDataURL("image/png");
-  }, [croppedImageSrc, mappedLandmarks]);
+  };
 
   const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
     return new Promise((resolve) => {
@@ -592,16 +608,26 @@ export default function VisualizerApp() {
         const noseConfig = NOSE_TECHNIQUES[noseTechnique];
         promptParts.push(noseConfig.prompt_suffix);
         maxStrength = Math.max(maxStrength, noseConfig.strength);
-        const warped = generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
+        const warped = await generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
         if (warped) targetImage = warped;
       }
       
       const compositePrompt = promptParts.join(" ");
+
+      // Fixed Bug #6: Scoped negative prompts based on active features
+      const activeNegatives: string[] = ["plastic skin", "distorted geometry", "overfilled face", "asymmetry"];
+      if (selectedFeatures.includes("cheeks")) {
+        activeNegatives.push("lower cheek bulge", "inferior volume sag", "exaggerated nasolabial folds", "heavy marionette lines", "unnatural cheek shadows", "sunken under-eyes");
+      }
+      if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
+        activeNegatives.push("harsh lines around mouth");
+      }
+      const scopedNegativePrompt = activeNegatives.join(", ");
       
       const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
         input: {
           prompt: compositePrompt,
-          negative_prompt: "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
+          negative_prompt: scopedNegativePrompt,
           image_url: targetImage,
           mask_url: maskDataUrl,
           strength: maxStrength,
@@ -617,6 +643,7 @@ export default function VisualizerApp() {
         setErrorMessage("AI simulation failed to return an image.");
       }
     } catch (err: unknown) {
+      console.error("Composite Simulation Execution Error:", err);
       const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
       setErrorMessage(msg);
     } finally {
