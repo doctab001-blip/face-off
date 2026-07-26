@@ -36,7 +36,6 @@ export default function VisualizerApp() {
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
-  const [sliderPos, setSliderPos] = useState<number>(50);
 
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
   const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
