@@ -576,9 +576,15 @@ export default function VisualizerApp() {
     });
   }, []);
 
-  const formatSimulationError = (err: unknown): string => {
-    if (err == null) return "Failed to run composite simulation (unknown null/undefined error).";
-    if (typeof err === "string") return err;
+  const logSimulationErrorDetails = (label: string, err: unknown) => {
+    if (err == null) {
+      console.error(label, "unknown null/undefined error");
+      return;
+    }
+    if (typeof err === "string") {
+      console.error(label, err);
+      return;
+    }
     if (err instanceof Error) {
       const anyErr = err as Error & {
         status?: number | string;
@@ -587,45 +593,32 @@ export default function VisualizerApp() {
         detail?: unknown;
         response?: { status?: number | string; data?: unknown };
       };
-      const parts: string[] = [];
-      if (anyErr.name && anyErr.name !== "Error") parts.push(`[${anyErr.name}]`);
-      if (anyErr.status != null) parts.push(`status=${anyErr.status}`);
-      if (anyErr.statusCode != null) parts.push(`statusCode=${anyErr.statusCode}`);
-      if (anyErr.response?.status != null) parts.push(`response.status=${anyErr.response.status}`);
-      if (anyErr.message) parts.push(anyErr.message);
-      if (anyErr.detail != null) {
-        parts.push(
-          typeof anyErr.detail === "string" ? anyErr.detail : JSON.stringify(anyErr.detail)
-        );
-      }
-      if (anyErr.body != null) {
-        parts.push(typeof anyErr.body === "string" ? anyErr.body : JSON.stringify(anyErr.body));
-      }
-      if (anyErr.response?.data != null) {
-        parts.push(
-          typeof anyErr.response.data === "string"
-            ? anyErr.response.data
-            : JSON.stringify(anyErr.response.data)
-        );
-      }
-      return parts.filter(Boolean).join(" | ") || err.message || "Failed to run composite simulation.";
+      console.error(label, {
+        name: anyErr.name,
+        message: anyErr.message,
+        status: anyErr.status,
+        statusCode: anyErr.statusCode,
+        responseStatus: anyErr.response?.status,
+        detail: anyErr.detail,
+        body: anyErr.body,
+        responseData: anyErr.response?.data,
+        raw: err,
+      });
+      return;
     }
-    if (typeof err === "object") {
-      try {
-        return JSON.stringify(err);
-      } catch {
-        return String(err);
-      }
-    }
-    return String(err);
+    console.error(label, err);
   };
+
+  const USER_SIMULATION_ERROR =
+    "Simulation failed — please try again. Check console for details.";
 
   const handleGeneratePreview = async () => {
     if (!croppedImageSrc || !maskDataUrl) {
       const msg = !croppedImageSrc
-        ? "Simulation blocked: no cropped portrait loaded."
-        : "Simulation blocked: mask not ready yet. Wait a moment after upload, then try again.";
-      console.error("handleGeneratePreview early exit:", msg, {
+        ? "Please upload a portrait before running the simulation."
+        : "Mask is still preparing — please wait a moment and try again.";
+      console.error("handleGeneratePreview early exit:", {
+        reason: msg,
         hasCroppedImage: Boolean(croppedImageSrc),
         hasMask: Boolean(maskDataUrl),
       });
@@ -675,16 +668,12 @@ export default function VisualizerApp() {
         const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
         setResultImage(featheredUrl);
       } else {
-        const emptyPayload = JSON.stringify(result?.data ?? result ?? null);
-        const msg = `AI simulation failed to return an image. Response: ${emptyPayload}`;
-        console.error("handleGeneratePreview empty result:", result);
-        setErrorMessage(msg);
+        console.error("handleGeneratePreview empty result:", result?.data ?? result ?? null);
+        setErrorMessage(USER_SIMULATION_ERROR);
       }
     } catch (err: unknown) {
-      const msg = formatSimulationError(err);
-      console.error("Composite Simulation Execution Error:", err);
-      console.error("Composite Simulation Formatted Error:", msg);
-      setErrorMessage(msg);
+      logSimulationErrorDetails("Composite Simulation Execution Error:", err);
+      setErrorMessage(USER_SIMULATION_ERROR);
     } finally {
       setLoading(false);
     }
@@ -762,7 +751,7 @@ export default function VisualizerApp() {
       </div>
 
       {errorMessage && (
-        <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-lg text-red-200 text-sm font-mono whitespace-pre-wrap break-words">
+        <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-lg text-red-200 text-sm">
           {errorMessage}
         </div>
       )}
@@ -918,21 +907,14 @@ export default function VisualizerApp() {
         </div>
       </div>
 
-      <div className="space-y-3">
-        {errorMessage && (
-          <div className="p-3 bg-red-950/70 border border-red-500/60 rounded-lg text-red-100 text-xs font-mono whitespace-pre-wrap break-words">
-            Simulation error: {errorMessage}
-          </div>
-        )}
-        <div className="flex justify-end">
-          <button
-            onClick={handleGeneratePreview}
-            disabled={!mappedLandmarks || loading}
-            className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md"
-          >
-            {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
-          </button>
-        </div>
+      <div className="flex justify-end">
+        <button
+          onClick={handleGeneratePreview}
+          disabled={!mappedLandmarks || loading}
+          className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md"
+        >
+          {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
+        </button>
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
