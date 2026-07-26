@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Legacy Gemini + local-warp demo. Not mounted by the app.
+ * The live entry point is `src/app/page.tsx` (MediaPipe + fal FLUX fill).
+ */
+
 import React, { useState, useEffect } from "react";
 
 export type Role = "facility_admin" | "staff" | "super_admin";

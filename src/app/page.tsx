@@ -1,11 +1,10 @@
 "use client";
 
 import React, { useState, useRef, useCallback } from "react";
-import { fal } from "@fal-ai/client";
-
-fal.config({ proxyUrl: "/api/fal/proxy" });
-
-type ProcedureId = "chin" | "cheeks" | "rhinoplasty" | "eyebrows" | "upperLip" | "lowerLip";
+import { fal } from "@/lib/fal";
+import { runProcedureInpainting } from "@/lib/inpainting";
+import { generateProcedureMask } from "@/lib/mediapipe/procedureMask";
+import type { ProcedureId } from "@/lib/types";
 
 interface ProcedureConfig {
   id: ProcedureId;
@@ -222,65 +221,6 @@ function createSamplePatientPortraitDataUrl(): string {
   return canvas.toDataURL("image/jpeg", 0.95);
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
-    img.src = src;
-  });
-}
-
-async function generateMaskForProcedures(
-  imageSrc: string,
-  selectedProcedures: ProcedureId[]
-): Promise<string> {
-  const img = await loadImage(imageSrc);
-  const canvas = document.createElement("canvas");
-  const width = img.naturalWidth || 800;
-  const height = img.naturalHeight || 800;
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return imageSrc;
-
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.fillStyle = "white";
-  ctx.filter = "blur(12px)";
-
-  selectedProcedures.forEach((procId) => {
-    ctx.save();
-    if (procId === "chin") {
-      ctx.beginPath();
-      ctx.ellipse(width * 0.5, height * 0.82, width * 0.12, height * 0.07, 0, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (procId === "cheeks") {
-      [0.36, 0.64].forEach((posX) => {
-        ctx.beginPath();
-        ctx.ellipse(width * posX, height * 0.48, width * 0.10, height * 0.06, posX > 0.5 ? -0.2 : 0.2, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    } else if (procId === "rhinoplasty") {
-      ctx.fillRect(width * 0.47, height * 0.35, width * 0.06, height * 0.22);
-    } else if (procId === "upperLip" || procId === "lowerLip") {
-      const posY = procId === "upperLip" ? 0.63 : 0.66;
-      ctx.beginPath();
-      ctx.ellipse(width * 0.5, height * posY, width * 0.08, height * 0.03, 0, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (procId === "eyebrows") {
-      [0.35, 0.65].forEach((posX) => {
-        ctx.fillRect(width * (posX - 0.07), height * 0.28, width * 0.14, height * 0.04);
-      });
-    }
-    ctx.restore();
-  });
-
-  return canvas.toDataURL("image/jpeg", 0.95);
-}
-
 export default function VisualizerApp() {
   const [activeTab, setActiveTab] = useState<"visualizer" | "pricing" | "register" | "facility_portal" | "admin_portal">("visualizer");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -401,7 +341,6 @@ export default function VisualizerApp() {
         setResultImage(null);
 
         const img = new Image();
-        img.crossOrigin = "anonymous";
         img.onload = () => autoDetectAndCenterFace(img);
         img.src = dataUrl;
       };
@@ -415,7 +354,6 @@ export default function VisualizerApp() {
     setResultImage(null);
 
     const img = new Image();
-    img.crossOrigin = "anonymous";
     img.onload = () => autoDetectAndCenterFace(img);
     img.src = sampleUrl;
   };
@@ -430,24 +368,21 @@ export default function VisualizerApp() {
   };
 
   const runSimulation = async () => {
-    if (!imageSrc) return;
+    if (!imageSrc || selectedProcedures.length === 0) return;
     setIsProcessing(true);
-    setStatusText("Uploading assets to Fal CDN & executing FLUX.1 Pro Fill...");
+    setStatusText("Detecting facial landmarks & building anatomical mask...");
 
     try {
-      const maskUrlData = await generateMaskForProcedures(imageSrc, selectedProcedures);
+      const { maskDataUrl, usedLandmarks } = await generateProcedureMask(
+        imageSrc,
+        selectedProcedures,
+      );
 
-      async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-        return new File([blob], filename, { type: blob.type });
-      }
-
-      const imageFile = await dataUrlToFile(imageSrc, "baseline.jpg");
-      const maskFile = await dataUrlToFile(maskUrlData, "mask.jpg");
-
-      const uploadedImageUrl = await fal.storage.upload(imageFile);
-      const uploadedMaskUrl = await fal.storage.upload(maskFile);
+      setStatusText(
+        usedLandmarks
+          ? "Uploading assets to fal CDN & executing FLUX.1 Pro Fill..."
+          : "Face landmarks unavailable — using approximate mask. Uploading to fal...",
+      );
 
       const procedureDirectives = selectedProcedures
         .map((id) => {
@@ -458,35 +393,39 @@ export default function VisualizerApp() {
 
       const promptText = `Professional clinical aesthetic procedure result showing subtle, natural, photorealistic modifications for: ${procedureDirectives}. Maintain 100% identity, skin texture, lighting, and background of the original patient portrait.`;
 
-      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
-        input: {
-          prompt: promptText,
-          image_url: uploadedImageUrl,
-          mask_url: uploadedMaskUrl,
-        },
+      const primary = selectedProcedures[0];
+      const avgIntensity = Math.round(
+        selectedProcedures.reduce((sum, id) => sum + configs[id].intensity, 0) /
+          selectedProcedures.length,
+      );
+
+      const { resultUrl } = await runProcedureInpainting(fal, {
+        imageUrl: imageSrc,
+        maskDataUrl,
+        procedure: primary,
+        intensity: avgIntensity,
+        promptOverride: promptText,
       });
 
-      if (result.data?.images?.[0]?.url) {
-        setResultImage(result.data.images[0].url);
-      } else {
-        alert("Simulation returned no image URL.");
+      setResultImage(resultUrl);
+
+      if (activeFacilityId) {
+        setFacilities((prev) =>
+          prev.map((f) =>
+            f.id === activeFacilityId
+              ? { ...f, simulationsUsed: f.simulationsUsed + 1 }
+              : f,
+          ),
+        );
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error("FLUX.1 Pro Fill execution failed:", err);
       alert(`Simulation Error: ${errorMessage}`);
+    } finally {
+      setIsProcessing(false);
+      setStatusText("");
     }
-
-    if (activeFacilityId) {
-      setFacilities((prev) =>
-        prev.map((f) =>
-          f.id === activeFacilityId ? { ...f, simulationsUsed: f.simulationsUsed + 1 } : f
-        )
-      );
-    }
-
-    setIsProcessing(false);
-    setStatusText("");
   };
 
   const handleRegisterFacility = (e: React.FormEvent) => {
@@ -874,9 +813,9 @@ export default function VisualizerApp() {
 
                   <button
                     onClick={runSimulation}
-                    disabled={!imageSrc || isProcessing}
+                    disabled={!imageSrc || isProcessing || selectedProcedures.length === 0}
                     className={`flex-1 sm:flex-none px-8 py-3 rounded-xl text-xs font-semibold transition shadow-lg flex items-center justify-center gap-2 ${
-                      !imageSrc || isProcessing
+                      !imageSrc || isProcessing || selectedProcedures.length === 0
                         ? isDark ? "bg-slate-800 text-slate-500 cursor-not-allowed" : "bg-slate-200 text-slate-400 cursor-not-allowed"
                         : "bg-amber-400 hover:bg-amber-300 text-gray-950 shadow-amber-500/10"
                     }`}
@@ -1045,7 +984,7 @@ export default function VisualizerApp() {
 
                 {resultImage ? (
                   <div
-                    className="relative w-full max-w-lg h-[500px] bg-black/80 rounded-xl overflow-hidden border border-amber-500/30 shadow-2xl select-none"
+                    className="relative w-full max-w-lg h-[500px] bg-black/80 rounded-xl overflow-hidden border border-amber-500/30 shadow-2xl select-none touch-none"
                     onMouseMove={(e) => {
                       if (!isDraggingSlider) return;
                       const rect = e.currentTarget.getBoundingClientRect();
@@ -1060,6 +999,7 @@ export default function VisualizerApp() {
                       setSliderPos((x / rect.width) * 100);
                     }}
                     onMouseUp={() => setIsDraggingSlider(false)}
+                    onMouseLeave={() => setIsDraggingSlider(false)}
                     onTouchEnd={() => setIsDraggingSlider(false)}
                   >
                     <div
@@ -1072,17 +1012,18 @@ export default function VisualizerApp() {
                         src={resultImage}
                         alt="Simulated Outcome"
                         className="w-full h-full object-cover"
+                        draggable={false}
                       />
                     </div>
 
+                    {/* Clip full-size before image so the divider reveals rather than rescales */}
                     <div
-                      className="absolute inset-0 overflow-hidden pointer-events-none"
-                      style={{ width: `${sliderPos}%` }}
+                      className="absolute inset-0 pointer-events-none"
+                      style={{ clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}
                     >
                       <div
-                        className="w-full h-full flex items-center justify-center transition-transform duration-300 ease-out overflow-hidden"
+                        className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-out overflow-hidden"
                         style={{
-                          width: "100%",
                           transform: `scale(${zoomLevel}) translate(${panOffset.x}px, ${panOffset.y}px)`,
                         }}
                       >
@@ -1090,6 +1031,7 @@ export default function VisualizerApp() {
                           src={imageSrc || ""}
                           alt="Baseline Overlay"
                           className="w-full h-full object-cover"
+                          draggable={false}
                         />
                       </div>
                     </div>
@@ -1338,6 +1280,186 @@ export default function VisualizerApp() {
                     </div>
                   </form>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "facility_portal" && (
+          <div className="max-w-5xl mx-auto py-6">
+            <h2 className={`text-xl font-bold mb-2 ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+              Facility Portal & Staff Ledger
+            </h2>
+            <p className={`text-xs font-mono mb-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+              Session-local demo ledger. Data resets on refresh until a backend is connected.
+            </p>
+
+            {facilities.length === 0 ? (
+              <div className={`p-8 rounded-2xl border text-center ${
+                isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"
+              }`}>
+                <p className={`text-sm mb-4 font-mono ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                  No clinical facilities registered in this session.
+                </p>
+                <button
+                  onClick={() => setActiveTab("pricing")}
+                  className="min-h-[44px] px-6 py-2.5 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950"
+                >
+                  Onboard First Facility
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {facilities.map((fac) => (
+                  <div
+                    key={fac.id}
+                    className={`p-6 rounded-2xl border ${
+                      isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200 shadow-md"
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-4 gap-4">
+                      <div>
+                        <h3 className="text-lg font-bold">{fac.name}</h3>
+                        <p className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                          {fac.email} • {fac.phone}
+                        </p>
+                        <p className={`text-xs font-mono mt-1 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                          {fac.address}
+                        </p>
+                      </div>
+                      <span className={`text-[10px] font-mono uppercase px-2.5 py-1 rounded border ${SUBSCRIPTION_TIERS[fac.tierId].badgeColor}`}>
+                        {SUBSCRIPTION_TIERS[fac.tierId].name}
+                      </span>
+                    </div>
+
+                    <div className={`grid grid-cols-2 sm:grid-cols-3 gap-4 p-4 rounded-xl border text-xs font-mono mb-4 ${
+                      isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50 border-slate-200"
+                    }`}>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Simulations Run</span>
+                        <span className="text-amber-400 font-bold">
+                          {fac.simulationsUsed} / {fac.simulationsLimit >= 99999 ? "∞" : fac.simulationsLimit}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Staff Accounts</span>
+                        <span>{fac.practitioners.length} Profiles</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Registration Date</span>
+                        <span>{fac.registeredDate}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="text-xs font-mono text-slate-400 block uppercase">
+                        Practitioner Accounts
+                      </span>
+                      {fac.practitioners.map((p) => (
+                        <div
+                          key={p.id}
+                          className={`p-3 rounded-xl border text-xs font-mono flex items-center justify-between gap-3 ${
+                            isDark ? "border-slate-800/80 bg-slate-950/20" : "border-slate-200 bg-slate-50"
+                          }`}
+                        >
+                          <div>
+                            <span className={`font-bold block ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {p.name}
+                            </span>
+                            <span className="text-slate-400 block">
+                              {p.email} • {p.title}
+                            </span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 text-[10px]">
+                            {p.role}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => setActiveFacilityId(fac.id)}
+                      className={`mt-4 min-h-[40px] px-4 py-2 rounded-xl text-xs font-mono border transition ${
+                        activeFacilityId === fac.id
+                          ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                          : isDark
+                            ? "bg-slate-900 text-slate-300 border-slate-700"
+                            : "bg-white text-slate-700 border-slate-300"
+                      }`}
+                    >
+                      {activeFacilityId === fac.id ? "Active Facility" : "Set as Active"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "admin_portal" && (
+          <div className="max-w-5xl mx-auto py-6">
+            <h2 className={`text-xl font-bold mb-2 ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+              Super Admin System Metrics
+            </h2>
+            <p className={`text-xs font-mono mb-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+              Cross-tenant demo metrics for this browser session only.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+              <div className={`p-4 rounded-xl border ${isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"}`}>
+                <span className="text-slate-400 text-xs font-mono block">Monthly Recurring Revenue</span>
+                <span className="text-2xl font-bold text-emerald-400">
+                  ${facilities.reduce((acc, f) => acc + SUBSCRIPTION_TIERS[f.tierId].priceMonthly, 0).toLocaleString()}
+                </span>
+              </div>
+              <div className={`p-4 rounded-xl border ${isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"}`}>
+                <span className="text-slate-400 text-xs font-mono block">Active Facilities</span>
+                <span className="text-2xl font-bold text-amber-400">{facilities.length}</span>
+              </div>
+              <div className={`p-4 rounded-xl border ${isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"}`}>
+                <span className="text-slate-400 text-xs font-mono block">Total Simulations Executed</span>
+                <span className="text-2xl font-bold text-blue-400">
+                  {facilities.reduce((acc, f) => acc + f.simulationsUsed, 0)}
+                </span>
+              </div>
+            </div>
+
+            {facilities.length === 0 ? (
+              <p className="text-xs font-mono text-slate-500 text-center py-8">
+                No registered facilities online.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {facilities.map((fac) => (
+                  <div
+                    key={fac.id}
+                    className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                      isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"
+                    }`}
+                  >
+                    <div>
+                      <span className="font-bold text-sm block">{fac.name}</span>
+                      <span className="text-xs font-mono text-slate-400">
+                        {fac.email} • {SUBSCRIPTION_TIERS[fac.tierId].name} • {fac.simulationsUsed}/
+                        {fac.simulationsLimit >= 99999 ? "∞" : fac.simulationsLimit} sims
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setFacilities((prev) =>
+                          prev.map((f) =>
+                            f.id === fac.id
+                              ? { ...f, simulationsLimit: f.simulationsLimit + 100 }
+                              : f,
+                          ),
+                        );
+                      }}
+                      className="min-h-[44px] px-3 py-1.5 rounded border font-mono bg-amber-500/10 text-amber-300 border-amber-500/30 text-xs"
+                    >
+                      +100 Credits
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

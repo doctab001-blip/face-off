@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.5.22",
     "@fal-ai/client": "^1.10.1",
     "@fal-ai/server-proxy": "^1.2.1",
     "@mediapipe/tasks-vision": "^0.10.22",
@@ -24,7 +23,7 @@
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
     "eslint": "^9.28.0",
-    "eslint-config-next": "^15.3.4",
+    "eslint-config-next": "^16.2.11",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.8.3"
   }
