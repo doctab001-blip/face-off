@@ -178,7 +178,6 @@ export default function VisualizerApp() {
 
   useEffect(() => {
     if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
-
     const img = new Image();
     img.onload = () => {
       const mainCanvas = canvasRef.current!;
@@ -187,71 +186,62 @@ export default function VisualizerApp() {
       const mainCtx = mainCanvas.getContext("2d");
       if (!mainCtx) return;
 
-      // Force Solid Black Background for Flux Inpainting
+      // 1. Force Solid Black Background
       mainCtx.fillStyle = "#000000";
       mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
 
-      const layerCanvas = document.createElement("canvas");
-      layerCanvas.width = img.width;
-      layerCanvas.height = img.height;
-      const layerCtx = layerCanvas.getContext("2d");
-      if (!layerCtx) return;
+      // 2. Setup direct drawing context with blur to bypass Safari bugs
+      mainCtx.filter = "blur(12px)";
+      mainCtx.lineCap = "round";
+      mainCtx.lineJoin = "round";
+      mainCtx.strokeStyle = "#FFFFFF";
+      mainCtx.fillStyle = "#FFFFFF";
 
-      // Use thick, blurred strokes instead of fills to guarantee anatomical coverage
-      layerCtx.lineCap = "round";
-      layerCtx.lineJoin = "round";
-      layerCtx.filter = "blur(16px)";
-
+      // 3. Draw massive white strokes directly over anatomical landmarks
       selectedFeatures.forEach((feat) => {
-        layerCtx.beginPath();
-        layerCtx.strokeStyle = "#FFFFFF";
-
         if (feat === "brows") {
-          layerCtx.lineWidth = 24;
+          mainCtx.lineWidth = 24;
           const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
           const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
           [leftBrow, rightBrow].forEach((brow) => {
-            layerCtx.beginPath();
-            layerCtx.moveTo(mappedLandmarks[brow[0]].x, mappedLandmarks[brow[0]].y);
-            brow.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
-            layerCtx.stroke();
+            mainCtx.beginPath();
+            mainCtx.moveTo(mappedLandmarks[brow[0]].x, mappedLandmarks[brow[0]].y);
+            brow.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+            mainCtx.stroke();
           });
         } else if (feat === "nose") {
-          layerCtx.lineWidth = 65; // Massive stroke to cover entire nose volume
-          layerCtx.beginPath();
-          layerCtx.moveTo(mappedLandmarks[NOSE_LANDMARKS[0]].x, mappedLandmarks[NOSE_LANDMARKS[0]].y);
-          NOSE_LANDMARKS.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
-          layerCtx.stroke();
+          mainCtx.lineWidth = 65;
+          mainCtx.beginPath();
+          mainCtx.moveTo(mappedLandmarks[NOSE_LANDMARKS[0]].x, mappedLandmarks[NOSE_LANDMARKS[0]].y);
+          NOSE_LANDMARKS.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+          mainCtx.stroke();
         } else if (feat === "cheeks") {
-          layerCtx.lineWidth = 75; // Massive stroke for malar/apple volume
+          mainCtx.lineWidth = 75;
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheek) => {
-            layerCtx.beginPath();
-            layerCtx.moveTo(mappedLandmarks[cheek[0]].x, mappedLandmarks[cheek[0]].y);
-            cheek.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
-            layerCtx.stroke();
+            mainCtx.beginPath();
+            mainCtx.moveTo(mappedLandmarks[cheek[0]].x, mappedLandmarks[cheek[0]].y);
+            cheek.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+            mainCtx.stroke();
           });
         } else if (feat === "chin") {
-          layerCtx.lineWidth = 60;
-          layerCtx.beginPath();
-          layerCtx.moveTo(mappedLandmarks[CHIN_LANDMARKS[0]].x, mappedLandmarks[CHIN_LANDMARKS[0]].y);
-          CHIN_LANDMARKS.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
-          layerCtx.stroke();
+          mainCtx.lineWidth = 60;
+          mainCtx.beginPath();
+          mainCtx.moveTo(mappedLandmarks[CHIN_LANDMARKS[0]].x, mappedLandmarks[CHIN_LANDMARKS[0]].y);
+          CHIN_LANDMARKS.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+          mainCtx.stroke();
         } else {
-          // Lips (Upper & Lower)
           const indices = FEATURE_INDICES[feat];
           if (indices) {
-            layerCtx.lineWidth = 35;
-            layerCtx.beginPath();
-            layerCtx.moveTo(mappedLandmarks[indices[0]].x, mappedLandmarks[indices[0]].y);
-            indices.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
-            layerCtx.stroke();
-            layerCtx.fillStyle = "#FFFFFF";
-            layerCtx.fill(); // Safe to fill lips as they are a closed anatomical loop
+            mainCtx.lineWidth = 35;
+            mainCtx.beginPath();
+            mainCtx.moveTo(mappedLandmarks[indices[0]].x, mappedLandmarks[indices[0]].y);
+            indices.forEach((idx) => mainCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+            mainCtx.stroke();
+            mainCtx.fill();
           }
         }
       });
 
-      mainCtx.drawImage(layerCanvas, 0, 0);
       setMaskDataUrl(mainCanvas.toDataURL("image/png"));
     };
     img.src = croppedImageSrc;
@@ -657,24 +647,25 @@ export default function VisualizerApp() {
 
       <canvas ref={canvasRef} className="hidden" />
 
+      {croppedImageSrc && resultImage && (
+        <div className="flex justify-end max-w-7xl mx-auto mt-4">
+          <button
+            onClick={handleExportPDF}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition"
+          >
+            📄 Export Patient Summary (PDF)
+          </button>
+        </div>
+      )}
+
       {croppedImageSrc && (
-        <div className="w-full max-w-6xl mx-auto mt-6">
-          {resultImage && (
-            <div className="flex justify-end mb-3">
-              <button
-                onClick={handleExportPDF}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition"
-              >
-                📄 Export Patient Summary (PDF)
-              </button>
-            </div>
-          )}
-          <div className={`grid gap-4 ${viewMode === "split" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
+        <div className="w-full max-w-7xl mx-auto mt-6">
+          <div className={`grid gap-2 ${viewMode === "split" ? "grid-cols-2" : "grid-cols-1"}`}>
             {/* BEFORE COLUMN */}
             {(viewMode === "split" || viewMode === "before") && (
-              <div className="relative rounded-xl overflow-hidden border border-gray-800 bg-black group min-h-[400px] flex items-center justify-center">
+              <div className="relative rounded-lg overflow-hidden bg-black group flex items-center justify-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={croppedImageSrc} alt="Before" className="w-full h-auto max-h-[80vh] object-contain" />
+                <img src={croppedImageSrc} alt="Before" className="w-full h-auto max-h-[85vh] object-contain" />
                 <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded font-mono shadow-md">
                   BEFORE
                 </span>
@@ -682,18 +673,17 @@ export default function VisualizerApp() {
                   onClick={() => setViewMode(viewMode === "split" ? "before" : "split")}
                   className="absolute top-3 right-3 bg-gray-900/80 hover:bg-amber-500 hover:text-black text-gray-300 text-xs font-semibold px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 shadow-lg"
                 >
-                  {viewMode === "split" ? "⤢ Expand" : "⤡ Split View"}
+                  {viewMode === "split" ? "⤢ Fullscreen" : "⤡ Split View"}
                 </button>
               </div>
             )}
-
             {/* AFTER COLUMN */}
             {(viewMode === "split" || viewMode === "after") && (
-              <div className="relative rounded-xl overflow-hidden border border-gray-800 bg-gray-950 flex flex-col items-center justify-center min-h-[400px] group">
+              <div className="relative rounded-lg overflow-hidden bg-gray-950 flex flex-col items-center justify-center min-h-[300px] group">
                 {resultImage ? (
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={resultImage} alt="After" className="w-full h-auto max-h-[80vh] object-contain" />
+                    <img src={resultImage} alt="After" className="w-full h-auto max-h-[85vh] object-contain" />
                     <span className="absolute bottom-3 right-3 bg-amber-500 text-black text-xs px-3 py-1.5 rounded font-bold font-mono shadow-md">
                       AFTER (
                       {selectedFeatures.length > 0
@@ -705,18 +695,15 @@ export default function VisualizerApp() {
                       onClick={() => setViewMode(viewMode === "split" ? "after" : "split")}
                       className="absolute top-3 right-3 bg-gray-900/80 hover:bg-amber-500 hover:text-black text-gray-300 text-xs font-semibold px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 shadow-lg"
                     >
-                      {viewMode === "split" ? "⤢ Expand" : "⤡ Split View"}
+                      {viewMode === "split" ? "⤢ Fullscreen" : "⤡ Split View"}
                     </button>
                   </>
                 ) : (
                   <div className="text-gray-500 text-sm font-mono text-center px-6">
                     {loading ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-amber-500">AI Rendering Architecture...</span>
-                      </div>
+                      <span className="text-amber-500 animate-pulse">Rendering AI Simulation...</span>
                     ) : (
-                      "Select procedures and click 'Run Simulation' to generate clinical results."
+                      "Select procedures and click 'Run Simulation'"
                     )}
                   </div>
                 )}
