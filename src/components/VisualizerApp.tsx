@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
 import {
-  LIPS_INNER_INDICES,
   FEATURE_INDICES,
   NOSE_LANDMARKS,
   CHEEK_LANDMARKS,
@@ -16,7 +15,6 @@ import {
   BROW_TECHNIQUES,
   LIP_TECHNIQUES,
   DOSAGE_MAP,
-  BROW_THICKNESS_MAP,
   type FeatureType,
 } from "./constants";
 
@@ -188,162 +186,75 @@ export default function VisualizerApp() {
       const mainCtx = mainCanvas.getContext("2d");
       if (!mainCtx) return;
 
+      // Force Solid Black Background for Flux Inpainting
       mainCtx.fillStyle = "#000000";
       mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
-
-      const upperLipCenter = mappedLandmarks[13];
-      const lowerLipCenter = mappedLandmarks[14];
-      const mouthGap =
-        upperLipCenter && lowerLipCenter
-          ? Math.hypot(lowerLipCenter.x - upperLipCenter.x, lowerLipCenter.y - upperLipCenter.y)
-          : 0;
 
       const layerCanvas = document.createElement("canvas");
       layerCanvas.width = img.width;
       layerCanvas.height = img.height;
       const layerCtx = layerCanvas.getContext("2d");
+      if (!layerCtx) return;
+
+      // Use thick, blurred strokes instead of fills to guarantee anatomical coverage
+      layerCtx.lineCap = "round";
+      layerCtx.lineJoin = "round";
+      layerCtx.filter = "blur(16px)";
 
       selectedFeatures.forEach((feat) => {
-        if (!layerCtx) return;
-        layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
-        layerCtx.save();
+        layerCtx.beginPath();
+        layerCtx.strokeStyle = "#FFFFFF";
 
         if (feat === "brows") {
-          layerCtx.filter = "none";
+          layerCtx.lineWidth = 24;
           const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
           const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
-          const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP["medium"];
-
-          [leftBrow, rightBrow].forEach((browIndices) => {
+          [leftBrow, rightBrow].forEach((brow) => {
             layerCtx.beginPath();
-            const startPt = mappedLandmarks[browIndices[0]];
-            if (!startPt) return;
-            layerCtx.moveTo(startPt.x, startPt.y);
-            for (let i = 1; i < browIndices.length; i++) {
-              const pt = mappedLandmarks[browIndices[i]];
-              if (pt) layerCtx.lineTo(pt.x, pt.y);
-            }
-            layerCtx.closePath();
-            layerCtx.fillStyle = "#FFFFFF";
-            layerCtx.fill();
-            layerCtx.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
-            layerCtx.strokeStyle = "#FFFFFF";
-            layerCtx.lineJoin = "miter";
-            layerCtx.stroke();
-          });
-        } else if (feat === "chin") {
-          const config = CHIN_TECHNIQUES[chinTechnique];
-          layerCtx.filter = `blur(${config.blurPx}px)`;
-          layerCtx.beginPath();
-          const startPt = mappedLandmarks[CHIN_LANDMARKS[0]];
-          if (startPt) {
-            layerCtx.moveTo(startPt.x, startPt.y);
-            for (let i = 1; i < CHIN_LANDMARKS.length; i++) {
-              const pt = mappedLandmarks[CHIN_LANDMARKS[i]];
-              if (pt) layerCtx.lineTo(pt.x, pt.y);
-            }
-            layerCtx.closePath();
-            layerCtx.fillStyle = "#FFFFFF";
-            layerCtx.fill();
-            layerCtx.lineWidth = 14;
-            layerCtx.strokeStyle = "#FFFFFF";
-            layerCtx.lineJoin = "round";
-            layerCtx.stroke();
-          }
-        } else if (feat === "cheeks") {
-          const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          layerCtx.filter = "blur(8px)";
-          const shiftY = -8;
-          [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
-            layerCtx.beginPath();
-            const startPt = mappedLandmarks[cheekIndices[0]];
-            if (!startPt) return;
-            layerCtx.moveTo(startPt.x, startPt.y + shiftY);
-            for (let i = 1; i < cheekIndices.length; i++) {
-              const pt = mappedLandmarks[cheekIndices[i]];
-              if (pt) layerCtx.lineTo(pt.x, pt.y + shiftY);
-            }
-            layerCtx.closePath();
-            layerCtx.fillStyle = "#FFFFFF";
-            layerCtx.fill();
-            layerCtx.lineWidth = dosageConfig.dilationPx;
-            layerCtx.strokeStyle = "#FFFFFF";
-            layerCtx.lineJoin = "round";
+            layerCtx.moveTo(mappedLandmarks[brow[0]].x, mappedLandmarks[brow[0]].y);
+            brow.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
             layerCtx.stroke();
           });
         } else if (feat === "nose") {
-          layerCtx.filter = "blur(8px)";
-          if (NOSE_LANDMARKS && NOSE_LANDMARKS.length > 0) {
+          layerCtx.lineWidth = 65; // Massive stroke to cover entire nose volume
+          layerCtx.beginPath();
+          layerCtx.moveTo(mappedLandmarks[NOSE_LANDMARKS[0]].x, mappedLandmarks[NOSE_LANDMARKS[0]].y);
+          NOSE_LANDMARKS.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+          layerCtx.stroke();
+        } else if (feat === "cheeks") {
+          layerCtx.lineWidth = 75; // Massive stroke for malar/apple volume
+          [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheek) => {
             layerCtx.beginPath();
-            const startPt = mappedLandmarks[NOSE_LANDMARKS[0]];
-            if (startPt) {
-              layerCtx.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < NOSE_LANDMARKS.length; i++) {
-                const pt = mappedLandmarks[NOSE_LANDMARKS[i]];
-                if (pt) layerCtx.lineTo(pt.x, pt.y);
-              }
-              layerCtx.closePath();
-              layerCtx.fillStyle = "#FFFFFF";
-              layerCtx.fill();
-              layerCtx.lineWidth = 10;
-              layerCtx.strokeStyle = "#FFFFFF";
-              layerCtx.lineJoin = "round";
-              layerCtx.stroke();
-            }
-          }
+            layerCtx.moveTo(mappedLandmarks[cheek[0]].x, mappedLandmarks[cheek[0]].y);
+            cheek.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+            layerCtx.stroke();
+          });
+        } else if (feat === "chin") {
+          layerCtx.lineWidth = 60;
+          layerCtx.beginPath();
+          layerCtx.moveTo(mappedLandmarks[CHIN_LANDMARKS[0]].x, mappedLandmarks[CHIN_LANDMARKS[0]].y);
+          CHIN_LANDMARKS.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+          layerCtx.stroke();
         } else {
-          layerCtx.filter = "blur(8px)";
+          // Lips (Upper & Lower)
           const indices = FEATURE_INDICES[feat];
-          if (indices && indices.length > 0) {
+          if (indices) {
+            layerCtx.lineWidth = 35;
             layerCtx.beginPath();
-            const startPt = mappedLandmarks[indices[0]];
-            if (startPt) {
-              layerCtx.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < indices.length; i++) {
-                const pt = mappedLandmarks[indices[i]];
-                if (pt) layerCtx.lineTo(pt.x, pt.y);
-              }
-              layerCtx.closePath();
-              if (feat.includes("lip") && mouthGap > 6) {
-                const innerStart = mappedLandmarks[LIPS_INNER_INDICES[0]];
-                if (innerStart) {
-                  layerCtx.moveTo(innerStart.x, innerStart.y);
-                  for (let j = 1; j < LIPS_INNER_INDICES.length; j++) {
-                    const innerPt = mappedLandmarks[LIPS_INNER_INDICES[j]];
-                    if (innerPt) layerCtx.lineTo(innerPt.x, innerPt.y);
-                  }
-                  layerCtx.closePath();
-                }
-              }
-              layerCtx.fillStyle = "#FFFFFF";
-              layerCtx.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
-              if (feat.includes("lip")) {
-                const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
-                layerCtx.lineWidth = dosageConfig.dilationPx;
-                layerCtx.strokeStyle = "#FFFFFF";
-                layerCtx.lineJoin = "round";
-                layerCtx.stroke();
-              }
-            }
+            layerCtx.moveTo(mappedLandmarks[indices[0]].x, mappedLandmarks[indices[0]].y);
+            indices.forEach((idx) => layerCtx.lineTo(mappedLandmarks[idx].x, mappedLandmarks[idx].y));
+            layerCtx.stroke();
+            layerCtx.fillStyle = "#FFFFFF";
+            layerCtx.fill(); // Safe to fill lips as they are a closed anatomical loop
           }
         }
-        layerCtx.restore();
-        mainCtx.drawImage(layerCanvas, 0, 0);
       });
+
+      mainCtx.drawImage(layerCanvas, 0, 0);
       setMaskDataUrl(mainCanvas.toDataURL("image/png"));
     };
     img.src = croppedImageSrc;
-  }, [
-    mappedLandmarks,
-    selectedFeatures,
-    browThickness,
-    lipDosage,
-    noseTechnique,
-    cheekTechnique,
-    cheekDosage,
-    chinTechnique,
-    croppedImageSrc,
-  ]);
+  }, [mappedLandmarks, selectedFeatures, croppedImageSrc]);
 
   const generateWarpedImage = useCallback(
     (radiusRatio: number, amount: number): string | null => {
@@ -468,7 +379,7 @@ export default function VisualizerApp() {
     setErrorMessage(null);
     try {
       const promptParts: string[] = ["Clinical aesthetic facial simulation:"];
-      let maxStrength = 0.82;
+      let maxStrength = 0.88;
       let targetImage = croppedImageSrc;
 
       if (selectedFeatures.includes("chin")) {
