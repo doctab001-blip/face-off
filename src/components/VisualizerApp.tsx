@@ -16,6 +16,33 @@ const FEATURE_INDICES: Record<string, number[]> = {
 
 const NOSE_LANDMARKS = [1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429];
 
+// NOSE_LANDMARKS isn't listed in perimeter order (it zigzags across the
+// midline), so connecting the raw indices with lineTo self-intersects into a
+// bowtie shape. Re-derive a simple (non-crossing) polygon by sorting the
+// mapped points by angle around their centroid before drawing.
+function angleSortIndices(
+  indices: number[],
+  points: Array<{ x: number; y: number } | undefined | null>,
+): number[] {
+  const withPts = indices
+    .map((idx) => ({ idx, pt: points[idx] }))
+    .filter((e): e is { idx: number; pt: { x: number; y: number } } => Boolean(e.pt));
+  if (withPts.length < 3) return indices;
+
+  const centroid = withPts.reduce(
+    (acc, e) => ({ x: acc.x + e.pt.x / withPts.length, y: acc.y + e.pt.y / withPts.length }),
+    { x: 0, y: 0 },
+  );
+
+  return [...withPts]
+    .sort(
+      (a, b) =>
+        Math.atan2(a.pt.y - centroid.y, a.pt.x - centroid.x) -
+        Math.atan2(b.pt.y - centroid.y, b.pt.x - centroid.x),
+    )
+    .map((e) => e.idx);
+}
+
 const CHEEK_LANDMARKS = {
   left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 227, 111, 36, 142, 100],
   right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 447, 340, 266, 371, 329],
@@ -426,13 +453,14 @@ export default function VisualizerApp() {
           });
         } else if (feat === "nose") {
           layerCtx.filter = "blur(8px)";
-          if (NOSE_LANDMARKS && NOSE_LANDMARKS.length > 0) {
+          const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
+          if (noseIndices.length > 0) {
             layerCtx.beginPath();
-            const startPt = mappedLandmarks[NOSE_LANDMARKS[0]];
+            const startPt = mappedLandmarks[noseIndices[0]];
             if (startPt) {
               layerCtx.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < NOSE_LANDMARKS.length; i++) {
-                const pt = mappedLandmarks[NOSE_LANDMARKS[i]];
+              for (let i = 1; i < noseIndices.length; i++) {
+                const pt = mappedLandmarks[noseIndices[i]];
                 if (pt) layerCtx.lineTo(pt.x, pt.y);
               }
               layerCtx.closePath();
@@ -529,7 +557,7 @@ export default function VisualizerApp() {
         if (dist < radius) {
           const normDist = dist / radius;
           const pinchFactor = Math.exp(-normDist * normDist * 3) * amount * verticalFactor;
-          const srcX = centerX + deltaX * (1 + pinchFactor);
+          const srcX = Math.max(0, Math.min(width - 1, centerX + deltaX * (1 + pinchFactor)));
           const x0 = Math.floor(srcX);
           const x1 = Math.min(width - 1, x0 + 1);
           const weight1 = srcX - x0;
@@ -617,7 +645,7 @@ export default function VisualizerApp() {
               fillPoly(CHEEK_LANDMARKS.right, -8);
             } else if (feat === "nose") {
               target.lineWidth = 12;
-              fillPoly(NOSE_LANDMARKS);
+              fillPoly(angleSortIndices(NOSE_LANDMARKS, landmarks));
             } else {
               const indices = FEATURE_INDICES[feat];
               if (!indices?.length) return;
@@ -677,7 +705,7 @@ export default function VisualizerApp() {
               appendPoly(CHEEK_LANDMARKS.left, -8);
               appendPoly(CHEEK_LANDMARKS.right, -8);
             } else if (feat === "nose") {
-              appendPoly(NOSE_LANDMARKS);
+              appendPoly(angleSortIndices(NOSE_LANDMARKS, landmarks));
             } else {
               const indices = FEATURE_INDICES[feat];
               if (indices?.length) appendPoly(indices);
