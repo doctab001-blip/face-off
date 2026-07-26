@@ -1,1760 +1,1262 @@
 "use client";
 
-/**
- * Legacy Gemini + local-warp demo. Not mounted by the app.
- * The live entry point is `src/app/page.tsx` (MediaPipe + fal FLUX fill).
- */
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
+import { fal } from "@fal-ai/client";
 
-import React, { useState, useEffect } from "react";
+fal.config({ proxyUrl: "/api/fal/proxy" });
 
-export type Role = "facility_admin" | "staff" | "super_admin";
-export type SubscriptionTierId = "boutique" | "clinical_group" | "enterprise";
-export type ProcedureId = "chin" | "cheeks" | "rhinoplasty" | "eyebrows" | "upperLip" | "lowerLip";
+const LIPS_INNER_INDICES = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
 
-export interface Facility {
-  id: string;
-  name: string;
-  licenseNumber: string;
-  email: string;
-  phone: string;
-  address: string;
-  tierId: SubscriptionTierId;
-  simulationsUsed: number;
-  simulationsLimit: number;
-  status: "active" | "pending" | "suspended";
-  registeredDate: string;
-}
+const FEATURE_INDICES: Record<string, number[]> = {
+  upper_lip: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191, 78],
+  lower_lip: [61, 78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146],
+  brows: [70, 63, 105, 66, 107, 55, 65, 52, 53, 46, 300, 293, 334, 296, 336, 285, 295, 282, 283, 276],
+};
 
-export interface Profile {
-  id: string;
-  facilityId: string;
-  fullName: string;
-  email: string;
-  role: Role;
-  title: string;
-  createdAt: string;
-}
+const NOSE_LANDMARKS = [1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429];
 
-export interface ProcedureConfig {
-  id: ProcedureId;
-  label: string;
-  preset: string;
-  intensity: number;
-}
+// Superior Zygomatic Process & Arch Prominence
+const CHEEK_LANDMARKS = {
+  left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 227, 111, 36, 142, 100],
+  right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 447, 340, 266, 371, 329],
+};
 
-export interface SubscriptionTier {
-  id: SubscriptionTierId;
-  name: string;
-  priceMonthly: number;
-  seats: string;
-  simulations: string;
-  badgeColor: string;
-  features: string[];
-}
+const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 18, 132, 58, 172, 136, 150, 149, 176, 148, 152];
 
-const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
-  boutique: {
-    id: "boutique",
-    name: "Boutique Practice",
-    priceMonthly: 199,
-    seats: "1 Practitioner",
-    simulations: "100 / month",
-    badgeColor: "bg-blue-500/10 text-blue-400 border-blue-500/30",
-    features: [
-      "1 Practitioner Account",
-      "100 AI Simulations / month",
-      "All 6 Core Facial Procedures",
-      "Standard PDF Consultation Export",
-      "Standard Support",
-    ],
+const NOSE_TECHNIQUES = {
+  straight_slim: {
+    name: "Straight & Slim Refinement",
+    prompt_suffix: "flawless narrow straight nasal bridge, delicate supratip break, refined defined nasal tip cartilage, subtle alar narrowing, seamless skin texture, photorealistic, 8k resolution",
+    strength: 0.52,
+    pinchRadiusRatio: 0.32,
+    pinchAmount: 0.28,
   },
-  clinical_group: {
-    id: "clinical_group",
-    name: "Clinical Group",
-    priceMonthly: 499,
-    seats: "Up to 5 Practitioners",
-    simulations: "500 / month",
-    badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-    features: [
-      "Up to 5 Practitioner Accounts",
-      "500 HD AI Simulations / month",
-      "Gemini 3.1 Flash AI Engine",
-      "Custom Facility Logo on PDF Reports",
-      "Multi-Mask Layering & Comparison Slider",
-      "Priority Clinical Support",
-    ],
+  dorsal_hump: {
+    name: "Dorsal Hump Reduction",
+    prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
+    strength: 0.48,
+    pinchRadiusRatio: 0.25,
+    pinchAmount: 0.20,
   },
-  enterprise: {
-    id: "enterprise",
-    name: "Enterprise Hospital",
-    priceMonthly: 1299,
-    seats: "Unlimited",
-    simulations: "Unlimited",
-    badgeColor: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-    features: [
-      "Unlimited Practitioner Seats",
-      "Unlimited High-Res AI Simulations",
-      "Multi-Location Facility Management",
-      "Custom Procedural Prompt Tuning",
-      "EMR / EHR API Integration Access",
-      "Dedicated Clinical Account Manager",
-    ],
+  tip_plasty: {
+    name: "Nasal Tip Refinement",
+    prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
+    strength: 0.45,
+    pinchRadiusRatio: 0.22,
+    pinchAmount: 0.22,
+  },
+  alar_reduction: {
+    name: "Alar Base Narrowing",
+    prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
+    strength: 0.42,
+    pinchRadiusRatio: 0.20,
+    pinchAmount: 0.20,
+  },
+  liquid_rhino: {
+    name: "Liquid Non-Surgical Rhinoplasty",
+    prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
+    strength: 0.40,
+    pinchRadiusRatio: 0.18,
+    pinchAmount: 0.12,
   },
 };
 
-const PROCEDURES_LIST: { id: ProcedureId; label: string }[] = [
-  { id: "chin", label: "Chin" },
-  { id: "cheeks", label: "Cheeks" },
-  { id: "rhinoplasty", label: "Rhinoplasty" },
-  { id: "eyebrows", label: "Eyebrows" },
-  { id: "upperLip", label: "Upper Lip" },
-  { id: "lowerLip", label: "Lower Lip" },
-];
-
-const PRESET_OPTIONS: Record<ProcedureId, string[]> = {
-  chin: [
-    "Anterior Projection (Mentoplasty)",
-    "Vertical Lengthening",
-    "Widen & Square Mentum",
-    "Soft Apex Taper",
-    "Submental Angle Refinement",
-  ],
-  cheeks: [
-    "Malar Volumetric Projection",
-    "Subzygomatic Hollow Softening",
-    "High Model Cheekbone Lift",
-    "Lateral Zygomatic Arch Contouring",
-  ],
-  rhinoplasty: [
-    "Straight & Slim Nasal Bridge",
-    "Dorsal Hump Reduction & Tip Lift",
-    "Alar Base Contouring & Narrowing",
-    "Nasal Tip Definition & Apex Refinement",
-    "Supratip Break & Straight Profile Contouring",
-  ],
-  eyebrows: [
-    "Lateral Arch Elevation",
-    "Medial Brow Softening",
-    "Symmetrical Tail Lift",
-    "Fox-Eye Arch Lift",
-  ],
-  upperLip: [
-    "Subtle Vermilion Border Definition (0.5 mL Filler)",
-    "Moderate Volume & Cupid's Bow Accentuation (1.0 mL Filler)",
-    "Plump Fullness & Lip Flip Simulation (1.5 mL Filler)",
-    "Asymmetry Correction & Vermilion Ratio Balance",
-  ],
-  lowerLip: [
-    "Subtle Lower Cushion Softening (0.5 mL Filler)",
-    "Central Pillow Volume Enhancement (1.0 mL Filler)",
-    "Full Volumetric Plumping & Keyhole Contour (1.5 mL Filler)",
-    "Symmetrical Cushion Balance & Lip Scale",
-  ],
+const CHEEK_TECHNIQUES = {
+  malar_volume: {
+    name: "Zygomatic Arch Projection",
+    prompt_suffix: "defined dermal filler projection over the zygomatic process and arch prominence, elevated high cheekbone apex, smooth transition to infraorbital rim, photorealistic",
+  },
+  apple_volume: {
+    name: "Anterior Zygomatic Body Fill",
+    prompt_suffix: "youthful dermal filler volume concentrated over anterior zygomatic body prominence, natural midface projection, seamless skin texture, photorealistic",
+  },
+  contour_sculpt: {
+    name: "High Zygomatic Arch Sculpting",
+    prompt_suffix: "chiseled lateral zygomatic arch highlight, elevated cheekbone structure, elegant midface contour, photorealistic",
+  },
 };
 
-function createSamplePatientPortraitDataUrl(): string {
-  const canvas = document.createElement("canvas");
-  canvas.width = 800;
-  canvas.height = 1000;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
+const CHEEK_DOSAGE_MAP: Record<string, { strength: number; dilationPx: number; promptLabel: string }> = {
+  "0.50ml": {
+    strength: 0.32,
+    dilationPx: 8,
+    promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence",
+  },
+  "1.00ml": {
+    strength: 0.40,
+    dilationPx: 14,
+    promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch",
+  },
+  "1.50ml": {
+    strength: 0.48,
+    dilationPx: 20,
+    promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure",
+  },
+};
 
-  const bgGrad = ctx.createRadialGradient(400, 500, 100, 400, 500, 600);
-  bgGrad.addColorStop(0, "#1e293b");
-  bgGrad.addColorStop(1, "#020617");
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, 0, 800, 1000);
+const CHIN_TECHNIQUES = {
+  anterior_projection: {
+    name: "Anterior Projection (Mentoplasty)",
+    prompt_suffix: "strong forward chin projection, prominent pogonion, well-defined chin tip, balanced facial profile line, photorealistic",
+    strength: 0.55,
+    blurPx: 12,
+  },
+  chin_lengthening: {
+    name: "Vertical Chin Elongation",
+    prompt_suffix: "elongated lower facial third, vertically extended chin length, defined lower mentum border, sleek proportion, photorealistic",
+    strength: 0.52,
+    blurPx: 12,
+  },
+  v_shape_slimming: {
+    name: "V-Line Slimming / T-Osteotomy",
+    prompt_suffix: "slim V-line chin tip, narrowed mental apex, delicate tapered lower jawline, sleek chin contour, photorealistic",
+    strength: 0.55,
+    blurPx: 12,
+  },
+  square_jaw_chin: {
+    name: "Broad Square Chin",
+    prompt_suffix: "broad masculine square chin, strong angular mental width, wide chiseled chin border, photorealistic",
+    strength: 0.55,
+    blurPx: 12,
+  },
+  cleft_smoothing: {
+    name: "Chin Dimple / Cleft Smoothing",
+    prompt_suffix: "smooth polished chin skin, completely filled chin dimple cleft, relaxed mentalis muscle, seamless chin contour, photorealistic",
+    strength: 0.50,
+    blurPx: 10,
+  },
+};
 
-  ctx.save();
-  ctx.fillStyle = "#e2a882";
-  ctx.beginPath();
-  ctx.ellipse(400, 480, 190, 260, 0, 0, Math.PI * 2);
-  ctx.fill();
+const BROW_TECHNIQUES = {
+  ombre_powder: {
+    name: "Ombré Powder Brows",
+    prompt_suffix: "ombre powder brows, razor-sharp clean lower border, crisp top outline, freshly waxed smooth skin, zero stray hairs outside border, dermaplaned skin, permanent makeup pixel shading, flawless symmetrical shape, photorealistic",
+  },
+  microblading: {
+    name: "Microblading",
+    prompt_suffix: "microblading eyebrows, ultra-sharp razor-crisp outer outline border, crisp individual 3D hair strokes inside clean stencil, pristine waxed skin perimeter, no stray hairs, photorealistic",
+  },
+  hybrid_tint: {
+    name: "Hybrid Brow Tint",
+    prompt_suffix: "hybrid brow tinting, razor-sharp waxed outline edge, deep skin stain underneath, crisp defined arch tail, smooth hairless surrounding skin, high contrast, photorealistic",
+  },
+};
 
-  ctx.fillRect(320, 680, 160, 220);
+const LIP_TECHNIQUES = {
+  russian: {
+    name: "Russian Lip Technique",
+    prompt_suffix: "Russian lip filler technique, vertical micro-threads, flat profile, heightened cupid's bow, plump volume, clean teeth, natural mouth opening, photorealistic",
+  },
+  classic_lip: {
+    name: "Classic Lip Linear",
+    prompt_suffix: "Classic lip filler, anterior 3D projection, horizontal volume enhancement, plump natural pout, clean teeth, photorealistic",
+  },
+};
 
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.ellipse(330, 430, 32, 16, 0, 0, Math.PI * 2);
-  ctx.ellipse(470, 430, 32, 16, 0, 0, Math.PI * 2);
-  ctx.fill();
+type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip";
 
-  ctx.fillStyle = "#332211";
-  ctx.beginPath();
-  ctx.arc(330, 430, 14, 0, Math.PI * 2);
-  ctx.arc(470, 430, 14, 0, Math.PI * 2);
-  ctx.fill();
+const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
+  "0.25ml": { strength: 0.35, dilationPx: 4 },
+  "0.50ml": { strength: 0.45, dilationPx: 8 },
+  "0.75ml": { strength: 0.55, dilationPx: 12 },
+  "1.00ml": { strength: 0.65, dilationPx: 16 },
+  "tint_soft": { strength: 0.52, dilationPx: 8 },
+  "tint_medium": { strength: 0.62, dilationPx: 14 },
+  "tint_bold": { strength: 0.72, dilationPx: 20 },
+};
 
-  ctx.strokeStyle = "#2b1a0d";
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.moveTo(280, 395);
-  ctx.quadraticCurveTo(330, 380, 370, 395);
-  ctx.moveTo(430, 395);
-  ctx.quadraticCurveTo(470, 380, 520, 395);
-  ctx.stroke();
+const BROW_THICKNESS_MAP: Record<string, { stroke: number; padding: number }> = {
+  thin: { stroke: 2, padding: 12 },
+  medium: { stroke: 6, padding: 18 },
+  thick: { stroke: 12, padding: 24 },
+};
 
-  ctx.strokeStyle = "#c48862";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(400, 410);
-  ctx.lineTo(392, 520);
-  ctx.lineTo(410, 535);
-  ctx.stroke();
+export default function VisualizerApp() {
+  const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
 
-  ctx.fillStyle = "#ba5d68";
-  ctx.beginPath();
-  ctx.moveTo(345, 600);
-  ctx.quadraticCurveTo(400, 585, 455, 600);
-  ctx.quadraticCurveTo(400, 605, 345, 600);
-  ctx.fill();
+  const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks"]);
 
-  ctx.beginPath();
-  ctx.moveTo(348, 602);
-  ctx.quadraticCurveTo(400, 635, 452, 602);
-  ctx.quadraticCurveTo(400, 605, 348, 602);
-  ctx.fill();
+  const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
+  const [browThickness, setBrowThickness] = useState<"thin" | "medium" | "thick">("medium");
+  const [browDensity] = useState<string>("tint_medium");
 
-  ctx.restore();
-  return canvas.toDataURL("image/jpeg", 0.95);
-}
+  const [lipTechnique, setLipTechnique] = useState<keyof typeof LIP_TECHNIQUES>("russian");
+  const [lipDosage, setLipDosage] = useState<string>("0.50ml");
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    if (src.startsWith("http://") || src.startsWith("https://")) {
-      img.crossOrigin = "anonymous";
-    }
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Failed to load image element"));
-    img.src = src;
-  });
-}
+  const [noseTechnique, setNoseTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("straight_slim");
+  const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
+  const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
+  const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
 
-function detectFaceBounds(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const data = imageData.data;
-  let minX = width, maxX = 0, minY = height, maxY = 0;
-  let count = 0;
+  const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
+  const [zoomScale, setZoomScale] = useState<number>(100);
 
-  for (let y = 0; y < height; y += 4) {
-    for (let x = 0; x < width; x += 4) {
-      const i = (y * width + x) * 4;
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
+  const [linePositions, setLinePositions] = useState<{
+    trichion: number;
+    glabella: number;
+    subnasale: number;
+    menton: number;
+    leftX: number;
+    rightX: number;
+  } | null>(null);
 
-      const isSkin =
-        r > 60 && g > 40 && b > 20 &&
-        r > g && (r - b) > 15 && (r - g) > 10 &&
-        Math.abs(r - g) < 100;
+  const [activeDraggingLine, setActiveDraggingLine] = useState<string | null>(null);
 
-      if (isSkin) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-        count++;
+  const [fullFacePhi, setFullFacePhi] = useState<{
+    facePhiRatio: string;
+    verticalThirdsRatio: string;
+    overallScore: string;
+    clinicalAnalysis: string;
+  } | null>(null);
+
+  const [landmarker, setLandmarker] = useState<FaceLandmarker | null>(null);
+  const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
+  const [mappedLandmarks, setMappedLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
+
+  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
+  const [resultImage, setResultImage] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sliderPos, setSliderPos] = useState<number>(50);
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const loadedImageRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    async function initMediaPipe() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+        const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+            delegate: "CPU",
+          },
+          runningMode: "IMAGE",
+          numFaces: 1,
+        });
+        setLandmarker(faceLandmarker);
+      } catch {
+        setErrorMessage("Failed to load facial recognition engine.");
       }
     }
-  }
+    initMediaPipe();
+  }, []);
 
-  if (count > (width * height) / 400 && (maxX - minX) > width * 0.15) {
-    return {
-      cx: (minX + maxX) / 2,
-      cy: minY + (maxY - minY) * 0.45,
-      fw: maxX - minX,
-      fh: maxY - minY,
-    };
-  }
-
-  return {
-    cx: width * 0.5,
-    cy: height * 0.46,
-    fw: width * 0.42,
-    fh: height * 0.52,
+  const toggleFeature = (feat: FeatureType) => {
+    if (selectedFeatures.includes(feat)) {
+      if (selectedFeatures.length > 1) {
+        setSelectedFeatures(selectedFeatures.filter((f) => f !== feat));
+      }
+    } else {
+      setSelectedFeatures([...selectedFeatures, feat]);
+    }
   };
-}
 
-interface PixelWarp {
-  cx: number;
-  cy: number;
-  radiusX: number;
-  radiusY: number;
-  type: "narrow_x" | "inflate" | "shift_y";
-  strength: number;
-}
+  const recalculateMetricsFromLines = useCallback((lines: typeof linePositions) => {
+    if (!lines) return;
 
-function applyAnatomicalPixelWarp(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  warps: PixelWarp[]
-) {
-  if (warps.length === 0) return;
+    const { trichion, glabella, subnasale, menton, leftX, rightX } = lines;
 
-  const srcImgData = ctx.getImageData(0, 0, width, height);
-  const src = srcImgData.data;
-  const dstImgData = ctx.createImageData(width, height);
-  const dst = dstImgData.data;
+    const faceHeight = menton - trichion;
+    const faceWidth = Math.abs(rightX - leftX);
+    const facePhi = faceWidth > 0 ? (faceHeight / faceWidth).toFixed(3) : "1.618";
 
-  dst.set(src);
+    const upperThird = Math.abs(glabella - trichion);
+    const middleThird = Math.abs(subnasale - glabella);
+    const lowerThird = Math.abs(menton - subnasale);
+    const avgThird = (upperThird + middleThird + lowerThird) / 3;
+    const thirdsRatioStr = `${(upperThird / avgThird).toFixed(2)} : ${(middleThird / avgThird).toFixed(2)} : ${(lowerThird / avgThird).toFixed(2)}`;
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let u = x;
-      let v = y;
+    const phiDiff = Math.abs(parseFloat(facePhi) - 1.618);
+    const overallScore = Math.max(70, Math.min(99, 100 - phiDiff * 30)).toFixed(1);
 
-      for (let i = 0; i < warps.length; i++) {
-        const warp = warps[i];
-        const dx = (x - warp.cx) / warp.radiusX;
-        const dy = (y - warp.cy) / warp.radiusY;
-        const distSq = dx * dx + dy * dy;
+    let analysis = "Near-Ideal Divine Proportion (Φ 1.618)";
+    if (parseFloat(facePhi) < 1.5) analysis = "Wider Midface Geometry / Brachycephalic";
+    if (parseFloat(facePhi) > 1.75) analysis = "Elongated Facial Height / Dolichocephalic";
 
-        if (distSq < 1.0) {
-          const falloff = (1.0 - distSq) * (1.0 - distSq);
+    setFullFacePhi({
+      facePhiRatio: facePhi,
+      verticalThirdsRatio: thirdsRatioStr,
+      overallScore: `${overallScore}%`,
+      clinicalAnalysis: analysis,
+    });
+  }, []);
 
-          if (warp.type === "narrow_x") {
-            u += (x - warp.cx) * warp.strength * falloff * 0.012;
-          } else if (warp.type === "inflate") {
-            u -= dx * warp.radiusX * warp.strength * falloff * 0.008;
-            v -= dy * warp.radiusY * warp.strength * falloff * 0.008;
-          } else if (warp.type === "shift_y") {
-            v += warp.strength * falloff * 0.6;
+  const updateViewportAndCrop = useCallback((img: HTMLImageElement, pixelLms: Array<{ x: number; y: number }>, scale: number) => {
+    const origW = img.width;
+    const origH = img.height;
+
+    const glabellaY = pixelLms[9].y;
+    const subnasaleY = pixelLms[2].y;
+    const leftCheekX = pixelLms[234].x;
+    const rightCheekX = pixelLms[454].x;
+
+    const midfaceH = Math.abs(subnasaleY - glabellaY);
+
+    const calcTrichionY = Math.max(0, glabellaY - midfaceH);
+    const calcMentonY = Math.min(origH, subnasaleY + midfaceH * 1.1);
+
+    const faceWidth = Math.abs(rightCheekX - leftCheekX);
+    const faceHeight = Math.abs(calcMentonY - calcTrichionY);
+
+    const scaleMultiplier = scale / 100;
+    const padX = faceWidth * 0.35 * scaleMultiplier;
+    const padTop = faceHeight * 0.25 * scaleMultiplier;
+    const padBottom = faceHeight * 0.25 * scaleMultiplier;
+
+    const cropX = Math.max(0, leftCheekX - padX);
+    const cropY = Math.max(0, calcTrichionY - padTop);
+    let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
+    let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
+
+    // Enforce 64px multiple to prevent PyTorch 422 shape mismatch errors
+    cropW = Math.max(64, Math.floor(cropW / 64) * 64);
+    cropH = Math.max(64, Math.floor(cropH / 64) * 64);
+
+    const mapped = pixelLms.map((pt) => ({
+      x: pt.x - cropX,
+      y: pt.y - cropY,
+    }));
+
+    const initialLines = {
+      trichion: calcTrichionY - cropY,
+      glabella: glabellaY - cropY,
+      subnasale: subnasaleY - cropY,
+      menton: calcMentonY - cropY,
+      leftX: leftCheekX - cropX,
+      rightX: rightCheekX - cropX,
+    };
+
+    setMappedLandmarks(mapped);
+    setLinePositions(initialLines);
+
+    const cropCanvas = document.createElement("canvas");
+    cropCanvas.width = cropW;
+    cropCanvas.height = cropH;
+    const cropCtx = cropCanvas.getContext("2d");
+    if (cropCtx) {
+      cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
+    }
+    recalculateMetricsFromLines(initialLines);
+  }, [recalculateMetricsFromLines]);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setErrorMessage(null);
+    setResultImage(null);
+    setCroppedImageSrc(null);
+    setFullFacePhi(null);
+    setMappedLandmarks(null);
+    setLinePositions(null);
+
+    const file = e.target.files?.[0];
+    if (!file || !landmarker) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const src = event.target?.result as string;
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = src;
+      img.onload = () => {
+        loadedImageRef.current = img;
+        try {
+          const results = landmarker.detect(img);
+          if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
+            const rawLms = results.faceLandmarks[0];
+            const pixelLms = rawLms.map((pt: { x: number; y: number }) => ({
+              x: pt.x * img.width,
+              y: pt.y * img.height,
+            }));
+
+            setRawPixelLandmarks(pixelLms);
+            updateViewportAndCrop(img, pixelLms, zoomScale);
+          } else {
+            setErrorMessage("No face detected. Upload a front-facing portrait.");
+          }
+        } catch {
+          setErrorMessage("Failed to analyze facial geometry.");
+        }
+      };
+    };
+    reader.readAsDataURL(file);
+  };
+
+  useEffect(() => {
+    if (loadedImageRef.current && rawPixelLandmarks) {
+      updateViewportAndCrop(loadedImageRef.current, rawPixelLandmarks, zoomScale);
+    }
+  }, [zoomScale, rawPixelLandmarks, updateViewportAndCrop]);
+
+  // ISOLATED MULTI-LAYER MASK COMPOSITING EFFECT
+  useEffect(() => {
+    if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
+
+    const img = new Image();
+    img.src = croppedImageSrc;
+    img.onload = () => {
+      const mainCanvas = canvasRef.current;
+      if (!mainCanvas) return;
+      mainCanvas.width = img.width;
+      mainCanvas.height = img.height;
+      const mainCtx = mainCanvas.getContext("2d");
+      if (!mainCtx) return;
+
+      mainCtx.fillStyle = "black";
+      mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
+
+      const upperLipCenter = mappedLandmarks[13];
+      const lowerLipCenter = mappedLandmarks[14];
+      const mouthGap = upperLipCenter && lowerLipCenter
+        ? Math.hypot(lowerLipCenter.x - upperLipCenter.x, lowerLipCenter.y - upperLipCenter.y)
+        : 0;
+
+      const layerCanvas = document.createElement("canvas");
+      layerCanvas.width = img.width;
+      layerCanvas.height = img.height;
+      const layerCtx = layerCanvas.getContext("2d");
+
+      selectedFeatures.forEach((feat) => {
+        if (!layerCtx) return;
+
+        layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
+        layerCtx.save();
+
+        if (feat === "brows") {
+          layerCtx.filter = "none";
+          const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
+          const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
+          const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP["medium"];
+
+          [leftBrow, rightBrow].forEach((browIndices) => {
+            layerCtx.beginPath();
+            const startPt = mappedLandmarks[browIndices[0]];
+            if (!startPt) return;
+            layerCtx.moveTo(startPt.x, startPt.y);
+            for (let i = 1; i < browIndices.length; i++) {
+              const pt = mappedLandmarks[browIndices[i]];
+              if (pt) layerCtx.lineTo(pt.x, pt.y);
+            }
+            layerCtx.closePath();
+            layerCtx.fillStyle = "white";
+            layerCtx.fill();
+
+            layerCtx.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
+            layerCtx.strokeStyle = "white";
+            layerCtx.lineJoin = "miter";
+            layerCtx.stroke();
+          });
+        } else if (feat === "chin") {
+          const config = CHIN_TECHNIQUES[chinTechnique];
+          layerCtx.filter = `blur(${config.blurPx}px)`;
+
+          layerCtx.beginPath();
+          const startPt = mappedLandmarks[CHIN_LANDMARKS[0]];
+          if (startPt) {
+            layerCtx.moveTo(startPt.x, startPt.y);
+            for (let i = 1; i < CHIN_LANDMARKS.length; i++) {
+              const pt = mappedLandmarks[CHIN_LANDMARKS[i]];
+              if (pt) layerCtx.lineTo(pt.x, pt.y);
+            }
+            layerCtx.closePath();
+            layerCtx.fillStyle = "white";
+            layerCtx.fill();
+
+            layerCtx.lineWidth = 14;
+            layerCtx.strokeStyle = "white";
+            layerCtx.lineJoin = "round";
+            layerCtx.stroke();
+          }
+        } else if (feat === "cheeks") {
+          const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+          layerCtx.filter = "blur(8px)";
+          const shiftY = -8;
+
+          [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
+            layerCtx.beginPath();
+            const startPt = mappedLandmarks[cheekIndices[0]];
+            if (!startPt) return;
+            layerCtx.moveTo(startPt.x, startPt.y + shiftY);
+            for (let i = 1; i < cheekIndices.length; i++) {
+              const pt = mappedLandmarks[cheekIndices[i]];
+              if (pt) layerCtx.lineTo(pt.x, pt.y + shiftY);
+            }
+            layerCtx.closePath();
+            layerCtx.fillStyle = "white";
+            layerCtx.fill();
+
+            layerCtx.lineWidth = dosageConfig.dilationPx;
+            layerCtx.strokeStyle = "white";
+            layerCtx.lineJoin = "round";
+            layerCtx.stroke();
+          });
+        } else if (feat === "nose") {
+          layerCtx.filter = "blur(8px)";
+
+          if (NOSE_LANDMARKS && NOSE_LANDMARKS.length > 0) {
+            layerCtx.beginPath();
+            const startPt = mappedLandmarks[NOSE_LANDMARKS[0]];
+            if (startPt) {
+              layerCtx.moveTo(startPt.x, startPt.y);
+              for (let i = 1; i < NOSE_LANDMARKS.length; i++) {
+                const pt = mappedLandmarks[NOSE_LANDMARKS[i]];
+                if (pt) layerCtx.lineTo(pt.x, pt.y);
+              }
+              layerCtx.closePath();
+              layerCtx.fillStyle = "white";
+              layerCtx.fill();
+
+              layerCtx.lineWidth = 10;
+              layerCtx.strokeStyle = "white";
+              layerCtx.lineJoin = "round";
+              layerCtx.stroke();
+            }
+          }
+        } else {
+          layerCtx.filter = "blur(8px)";
+          const indices = FEATURE_INDICES[feat];
+
+          if (indices && indices.length > 0) {
+            layerCtx.beginPath();
+            const startPt = mappedLandmarks[indices[0]];
+            if (startPt) {
+              layerCtx.moveTo(startPt.x, startPt.y);
+              for (let i = 1; i < indices.length; i++) {
+                const pt = mappedLandmarks[indices[i]];
+                if (pt) layerCtx.lineTo(pt.x, pt.y);
+              }
+              layerCtx.closePath();
+
+              if (feat.includes("lip") && mouthGap > 6) {
+                const innerStart = mappedLandmarks[LIPS_INNER_INDICES[0]];
+                if (innerStart) {
+                  layerCtx.moveTo(innerStart.x, innerStart.y);
+                  for (let j = 1; j < LIPS_INNER_INDICES.length; j++) {
+                    const innerPt = mappedLandmarks[LIPS_INNER_INDICES[j]];
+                    if (innerPt) layerCtx.lineTo(innerPt.x, innerPt.y);
+                  }
+                  layerCtx.closePath();
+                }
+              }
+
+              layerCtx.fillStyle = "white";
+              layerCtx.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
+
+              if (feat.includes("lip")) {
+                const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
+                layerCtx.lineWidth = dosageConfig.dilationPx;
+                layerCtx.strokeStyle = "white";
+                layerCtx.lineJoin = "round";
+                layerCtx.stroke();
+              }
+            }
+          }
+        }
+
+        layerCtx.restore();
+
+        mainCtx.drawImage(layerCanvas, 0, 0);
+      });
+
+      setMaskDataUrl(mainCanvas.toDataURL("image/png"));
+
+      if (overlayCanvasRef.current && linePositions) {
+        const overlayCanvas = overlayCanvasRef.current;
+        overlayCanvas.width = img.width;
+        overlayCanvas.height = img.height;
+        const oCtx = overlayCanvas.getContext("2d");
+        if (oCtx) {
+          oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+          if (showGoldenRatio) {
+            const { trichion, glabella, subnasale, menton, leftX, rightX } = linePositions;
+            const lines = [
+              { key: "trichion", y: trichion, label: "Trichion (Hairline)" },
+              { key: "glabella", y: glabella, label: "Glabella (Brow Line)" },
+              { key: "subnasale", y: subnasale, label: "Subnasale (Nose Base)" },
+              { key: "menton", y: menton, label: "Menton (Chin Tip)" },
+            ];
+
+            lines.forEach((line) => {
+              const isDragging = activeDraggingLine === line.key;
+              oCtx.strokeStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.lineWidth = isDragging ? 3 : 1.5;
+              oCtx.beginPath();
+              oCtx.moveTo(leftX - 25, line.y);
+              oCtx.lineTo(rightX + 25, line.y);
+              oCtx.stroke();
+
+              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.beginPath();
+              oCtx.arc(rightX + 25, line.y, 5, 0, Math.PI * 2);
+              oCtx.fill();
+
+              oCtx.font = "10px monospace";
+              oCtx.fillStyle = isDragging ? "#fbbf24" : "#818cf8";
+              oCtx.fillText(`${line.label}`, rightX + 35, line.y + 3);
+            });
+
+            oCtx.strokeStyle = "#f59e0b";
+            oCtx.lineWidth = 2;
+            oCtx.strokeRect(leftX, trichion, rightX - leftX, menton - trichion);
+            oCtx.font = "11px monospace";
+            oCtx.fillStyle = "#fbbf24";
+            oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
           }
         }
       }
-
-      const uClamped = Math.max(0, Math.min(width - 1, u));
-      const vClamped = Math.max(0, Math.min(height - 1, v));
-
-      const x0 = Math.floor(uClamped);
-      const y0 = Math.floor(vClamped);
-      const x1 = Math.min(width - 1, x0 + 1);
-      const y1 = Math.min(height - 1, y0 + 1);
-
-      const wx = uClamped - x0;
-      const wy = vClamped - y0;
-
-      const i00 = (y0 * width + x0) * 4;
-      const i10 = (y0 * width + x1) * 4;
-      const i01 = (y1 * width + x0) * 4;
-      const i11 = (y1 * width + x1) * 4;
-
-      const dstIdx = (y * width + x) * 4;
-
-      for (let c = 0; c < 4; c++) {
-        const top = src[i00 + c] * (1 - wx) + src[i10 + c] * wx;
-        const bottom = src[i01 + c] * (1 - wx) + src[i11 + c] * wx;
-        dst[dstIdx + c] = Math.round(top * (1 - wy) + bottom * wy);
-      }
-    }
-  }
-
-  ctx.putImageData(dstImgData, 0, 0);
-}
-
-async function generateLocalSculptedSimulation(
-  imageSrc: string,
-  selectedProcedures: ProcedureId[],
-  configs: Record<ProcedureId, ProcedureConfig>
-): Promise<string> {
-  const img = await loadImage(imageSrc);
-
-  const maxDim = 900;
-  let width = img.naturalWidth || 800;
-  let height = img.naturalHeight || 800;
-  if (width > maxDim || height > maxDim) {
-    const scale = maxDim / Math.max(width, height);
-    width = Math.round(width * scale);
-    height = Math.round(height * scale);
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return imageSrc;
-
-  ctx.drawImage(img, 0, 0, width, height);
-
-  const { cx, cy, fw, fh } = detectFaceBounds(ctx, width, height);
-  const warps: PixelWarp[] = [];
-
-  selectedProcedures.forEach((procId) => {
-    const conf = configs[procId];
-    const baseFactor = (conf.intensity || 50) / 100;
-
-    let volumeMultiplier = 1.0;
-    if (conf.preset.includes("0.5 mL")) volumeMultiplier = 0.7;
-    if (conf.preset.includes("1.0 mL")) volumeMultiplier = 1.1;
-    if (conf.preset.includes("1.5 mL")) volumeMultiplier = 1.6;
-
-    const factor = baseFactor * volumeMultiplier;
-
-    if (procId === "rhinoplasty") {
-      const noseY = cy - fh * 0.04;
-      const noseX = cx;
-
-      warps.push({
-        cx: noseX,
-        cy: noseY,
-        radiusX: fw * 0.14,
-        radiusY: fh * 0.18,
-        type: "narrow_x",
-        strength: 22 * factor,
-      });
-
-      warps.push({
-        cx: noseX,
-        cy: noseY + fh * 0.08,
-        radiusX: fw * 0.1,
-        radiusY: fh * 0.08,
-        type: "shift_y",
-        strength: -10 * factor,
-      });
-    } else if (procId === "upperLip") {
-      const lipY = cy + fh * 0.22;
-      warps.push({
-        cx: cx,
-        cy: lipY,
-        radiusX: fw * 0.22,
-        radiusY: fh * 0.06,
-        type: "inflate",
-        strength: 20 * factor,
-      });
-    } else if (procId === "lowerLip") {
-      const lipY = cy + fh * 0.27;
-      warps.push({
-        cx: cx,
-        cy: lipY,
-        radiusX: fw * 0.24,
-        radiusY: fh * 0.07,
-        type: "inflate",
-        strength: 22 * factor,
-      });
-    } else if (procId === "chin") {
-      const chinY = cy + fh * 0.42;
-      warps.push({
-        cx: cx,
-        cy: chinY,
-        radiusX: fw * 0.24,
-        radiusY: fh * 0.12,
-        type: "inflate",
-        strength: 18 * factor,
-      });
-      warps.push({
-        cx: cx,
-        cy: chinY,
-        radiusX: cx,
-        radiusY: chinY,
-        type: "shift_y",
-        strength: 12 * factor,
-      });
-    } else if (procId === "cheeks") {
-      const isSubzygomatic = conf.preset.includes("Subzygomatic");
-      const isHighLift = conf.preset.includes("High Model");
-
-      const cheekY = cy + fh * (isSubzygomatic ? 0.12 : isHighLift ? -0.01 : 0.03);
-      const cheekXOffset = fw * (isSubzygomatic ? 0.32 : 0.30);
-
-      [cx - cheekXOffset, cx + cheekXOffset].forEach((cheekX) => {
-        warps.push({
-          cx: cheekX,
-          cy: cheekY,
-          radiusX: fw * 0.20,
-          radiusY: fh * 0.14,
-          type: "inflate",
-          strength: 26 * factor,
-        });
-
-        if (isHighLift) {
-          warps.push({
-            cx: cheekX,
-            cy: cheekY,
-            radiusX: fw * 0.18,
-            radiusY: fh * 0.12,
-            type: "shift_y",
-            strength: -12 * factor,
-          });
-        }
-      });
-    } else if (procId === "eyebrows") {
-      [cx - fw * 0.22, cx + fw * 0.22].forEach((browX) => {
-        warps.push({
-          cx: browX,
-          cy: cy - fh * 0.24,
-          radiusX: fw * 0.16,
-          radiusY: fh * 0.08,
-          type: "shift_y",
-          strength: -12 * factor,
-        });
-      });
-    }
-  });
-
-  applyAnatomicalPixelWarp(ctx, width, height, warps);
-
-  /* Malar Catchlight Overlay for Cheeks */
-  if (selectedProcedures.includes("cheeks")) {
-    const conf = configs["cheeks"];
-    const baseFactor = (conf.intensity || 50) / 100;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "soft-light";
-
-    const isSubzygomatic = conf.preset.includes("Subzygomatic");
-    const cheekY = cy + fh * (isSubzygomatic ? 0.12 : 0.03);
-    const cheekXOffset = fw * 0.30;
-
-    [cx - cheekXOffset, cx + cheekXOffset].forEach((cheekX) => {
-      const cheekGrad = ctx.createRadialGradient(cheekX, cheekY, 2, cheekX, cheekY, fw * 0.18);
-      cheekGrad.addColorStop(0, `rgba(255, 250, 242, ${0.35 * baseFactor})`);
-      cheekGrad.addColorStop(0.7, `rgba(240, 215, 195, ${0.12 * baseFactor})`);
-      cheekGrad.addColorStop(1, "rgba(0,0,0,0)");
-
-      ctx.fillStyle = cheekGrad;
-      ctx.beginPath();
-      ctx.ellipse(cheekX, cheekY, fw * 0.18, fh * 0.12, 0, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    ctx.restore();
-  }
-
-  if (selectedProcedures.includes("upperLip") || selectedProcedures.includes("lowerLip")) {
-    ctx.save();
-    ctx.globalCompositeOperation = "soft-light";
-    const lipY = cy + fh * 0.24;
-    const lipGrad = ctx.createRadialGradient(cx, lipY, 2, cx, lipY, fw * 0.22);
-    lipGrad.addColorStop(0, "rgba(235, 110, 130, 0.2)");
-    lipGrad.addColorStop(0.8, "rgba(215, 90, 110, 0.08)");
-    lipGrad.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = lipGrad;
-    ctx.beginPath();
-    ctx.ellipse(cx, lipY, fw * 0.22, fh * 0.08, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  return canvas.toDataURL("image/jpeg", 0.95);
-}
-
-async function runGeminiImageSimulation(
-  base64Data: string,
-  promptText: string,
-  apiKeyOverride?: string
-): Promise<string | null> {
-  const apiKey = apiKeyOverride || "";
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`;
-
-  let base64Clean = base64Data;
-  let mimeType = "image/jpeg";
-  if (base64Data.includes(",")) {
-    const parts = base64Data.split(",");
-    base64Clean = parts[1];
-    const mimeMatch = parts[0].match(/data:(image\/[a-zA-Z0-9+\/]+);/);
-    if (mimeMatch) mimeType = mimeMatch[1];
-  }
-
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: `Execute a realistic clinical plastic surgery simulation on this patient photograph. Target anatomical procedures:\n${promptText}\n\nStrict Rules: Maintain exact identity, facial expressions, background, clothing, scarf, eyes, and skin texture. Modify ONLY the targeted facial features. If Cheeks is selected, project the malar cheekbones and subzygomatic contours smoothly without altering lower eyelids.`,
-          },
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Clean,
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseModalities: ["IMAGE"],
-    },
-  };
-
-  try {
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      const part = result?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-      if (part && part.inlineData?.data) {
-        return `data:${part.inlineData.mimeType || "image/jpeg"};base64,${part.inlineData.data}`;
-      }
-    } else {
-      console.warn("Gemini API HTTP status:", response.status);
-    }
-  } catch (e) {
-    console.warn("Gemini API call skipped or unconfigured", e);
-  }
-  return null;
-}
-
-export default function Home() {
-  const [activeTab, setActiveTab] = useState<"visualizer" | "pricing" | "register" | "auth" | "facility_portal" | "super_admin">("visualizer");
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
-  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
-
-  /* Multi-Tenancy State */
-  const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
-  const [activeFacility, setActiveFacility] = useState<Facility | null>(null);
-
-  /* API Key Modal */
-  const [geminiApiKey, setGeminiApiKey] = useState<string>("");
-  const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(false);
-
-  /* Multi-step Onboarding State */
-  const [regStep, setRegStep] = useState<1 | 2 | 3>(1);
-  const [selectedTierForRegister, setSelectedTierForRegister] = useState<SubscriptionTierId>("clinical_group");
-  const [regAdminForm, setRegAdminForm] = useState({ fullName: "", email: "", password: "", title: "Medical Director" });
-  const [regFacilityForm, setRegFacilityForm] = useState({ name: "", licenseNumber: "", phone: "", address: "" });
-  const [registrationMsg, setRegistrationMsg] = useState("");
-
-  /* Staff Sign-In Form */
-  const [authForm, setAuthForm] = useState({ email: "", password: "" });
-  const [authError, setAuthError] = useState("");
-
-  /* Visualizer State - Default to Rhinoplasty & Cheeks */
-  const [selectedProcedures, setSelectedProcedures] = useState<ProcedureId[]>(["rhinoplasty", "cheeks"]);
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [statusText, setStatusText] = useState<string>("");
-  const [resultImage, setResultImage] = useState<string | null>(null);
-  const [usedEngine, setUsedEngine] = useState<string>("");
-  const [isGridOn, setIsGridOn] = useState(true);
-  const [isFaceZoomOn, setIsFaceZoomOn] = useState(true);
-  const [faceZoomTransform, setFaceZoomTransform] = useState({ scale: 1.35, originX: 50, originY: 46 });
-  const [wipePercent, setWipePercent] = useState<number>(50);
-
-  const [configs, setConfigs] = useState<Record<ProcedureId, ProcedureConfig>>({
-    chin: { id: "chin", label: "Chin", preset: "Anterior Projection (Mentoplasty)", intensity: 60 },
-    cheeks: { id: "cheeks", label: "Cheeks", preset: "Malar Volumetric Projection", intensity: 65 },
-    rhinoplasty: { id: "rhinoplasty", label: "Rhinoplasty", preset: "Straight & Slim Nasal Bridge", intensity: 75 },
-    eyebrows: { id: "eyebrows", label: "Eyebrows", preset: "Lateral Arch Elevation", intensity: 60 },
-    upperLip: { id: "upperLip", label: "Upper Lip", preset: "Moderate Volume & Cupid's Bow Accentuation (1.0 mL Filler)", intensity: 75 },
-    lowerLip: { id: "lowerLip", label: "Lower Lip", preset: "Central Pillow Volume Enhancement (1.0 mL Filler)", intensity: 60 },
-  });
-
-  const isDark = theme === "dark";
-
-  /* Calculate face bounds & zoom scale when photo changes */
-  useEffect(() => {
-    if (!imageSrc) return;
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth || 800;
-      canvas.height = img.naturalHeight || 800;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const { cx, cy, fh } = detectFaceBounds(ctx, canvas.width, canvas.height);
-        const originX = Math.round((cx / canvas.width) * 100);
-        const originY = Math.round((cy / canvas.height) * 100);
-        const faceHeightRatio = fh / canvas.height;
-        const calculatedScale = Math.min(2.2, Math.max(1.25, 0.65 / Math.max(0.2, faceHeightRatio)));
-        setFaceZoomTransform({
-          scale: Number(calculatedScale.toFixed(2)),
-          originX,
-          originY,
-        });
-      }
     };
-    img.src = imageSrc;
-  }, [imageSrc]);
+  }, [mappedLandmarks, linePositions, activeDraggingLine, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc]);
 
-  const toggleProcedure = (procId: ProcedureId) => {
-    setSelectedProcedures((prev) =>
-      prev.includes(procId) ? prev.filter((id) => id !== procId) : [...prev, procId]
-    );
-  };
+  const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
+    if (!croppedImageSrc || !mappedLandmarks) return null;
 
-  const updateConfig = (procId: ProcedureId, key: "preset" | "intensity", value: string | number) => {
-    setConfigs((prev) => ({
-      ...prev,
-      [procId]: { ...prev[procId], [key]: value },
-    }));
-  };
+    const img = new Image();
+    img.src = croppedImageSrc;
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        setImageSrc(dataUrl);
-        setResultImage(null);
+    const warpCanvas = document.createElement("canvas");
+    const width = img.width;
+    const height = img.height;
+    warpCanvas.width = width;
+    warpCanvas.height = height;
+
+    const wCtx = warpCanvas.getContext("2d");
+    if (!wCtx) return croppedImageSrc;
+    wCtx.drawImage(img, 0, 0);
+
+    const srcData = wCtx.getImageData(0, 0, width, height);
+    const dstData = wCtx.createImageData(width, height);
+
+    const noseTip = mappedLandmarks[1];
+    const noseBridgeTop = mappedLandmarks[168];
+    if (!noseTip || !noseBridgeTop) return croppedImageSrc;
+
+    const centerX = noseTip.x;
+    const minY = Math.min(noseBridgeTop.y, noseTip.y) - 10;
+    const maxY = Math.max(noseBridgeTop.y, noseTip.y) + 20;
+
+    const leftAlar = mappedLandmarks[129] || mappedLandmarks[98];
+    const rightAlar = mappedLandmarks[358] || mappedLandmarks[327];
+    const noseWidth = leftAlar && rightAlar ? Math.abs(rightAlar.x - leftAlar.x) : width * 0.25;
+
+    const radius = noseWidth * (1 + radiusRatio);
+
+    const srcBytes = srcData.data;
+    const dstBytes = dstData.data;
+    dstBytes.set(srcBytes);
+
+    for (let y = Math.floor(minY); y <= Math.ceil(maxY); y++) {
+      if (y < 0 || y >= height) continue;
+
+      const deltaY = y - (minY + (maxY - minY) * 0.5);
+      const verticalFactor = Math.cos((deltaY / (maxY - minY)) * Math.PI * 0.5);
+
+      for (let x = Math.floor(centerX - radius); x <= Math.ceil(centerX + radius); x++) {
+        if (x < 0 || x >= width) continue;
+
+        const deltaX = x - centerX;
+        const dist = Math.abs(deltaX);
+
+        if (dist < radius) {
+          const normDist = dist / radius;
+          const pinchFactor = Math.exp(-normDist * normDist * 3) * amount * verticalFactor;
+          const srcX = centerX + deltaX * (1 + pinchFactor);
+
+          const x0 = Math.floor(srcX);
+          const x1 = Math.min(width - 1, x0 + 1);
+          const weight1 = srcX - x0;
+          const weight0 = 1 - weight1;
+
+          const dstIdx = (y * width + x) * 4;
+          const srcIdx0 = (y * width + x0) * 4;
+          const srcIdx1 = (y * width + x1) * 4;
+
+          for (let c = 0; c < 3; c++) {
+            dstBytes[dstIdx + c] = srcBytes[srcIdx0 + c] * weight0 + srcBytes[srcIdx1 + c] * weight1;
+          }
+        }
+      }
+    }
+
+    wCtx.putImageData(dstData, 0, 0);
+    return warpCanvas.toDataURL("image/png");
+  }, [croppedImageSrc, mappedLandmarks]);
+
+  // METHOD B: ADAPTIVE ALPHA EDGE-FEATHERING POST-PROCESSOR
+  const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const origImg = new Image();
+      const aiImg = new Image();
+      const maskImg = new Image();
+
+      let loadedCount = 0;
+      const checkLoaded = () => {
+        loadedCount++;
+        if (loadedCount === 3) {
+          const canvas = document.createElement("canvas");
+          const width = origImg.width;
+          const height = origImg.height;
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(aiResultUrl);
+
+          ctx.drawImage(aiImg, 0, 0, width, height);
+
+          const alphaCanvas = document.createElement("canvas");
+          alphaCanvas.width = width;
+          alphaCanvas.height = height;
+          const aCtx = alphaCanvas.getContext("2d");
+          if (!aCtx) return resolve(aiResultUrl);
+
+          aCtx.filter = "blur(16px)";
+          aCtx.drawImage(maskImg, 0, 0, width, height);
+
+          ctx.save();
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.drawImage(alphaCanvas, 0, 0);
+          ctx.globalCompositeOperation = "destination-over";
+          ctx.drawImage(origImg, 0, 0, width, height);
+          ctx.restore();
+
+          resolve(canvas.toDataURL("image/png"));
+        }
       };
-      reader.readAsDataURL(file);
+
+      origImg.crossOrigin = "anonymous";
+      aiImg.crossOrigin = "anonymous";
+      maskImg.crossOrigin = "anonymous";
+
+      origImg.onload = checkLoaded;
+      aiImg.onload = checkLoaded;
+      maskImg.onload = checkLoaded;
+
+      origImg.onerror = () => resolve(aiResultUrl);
+      aiImg.onerror = () => resolve(aiResultUrl);
+      maskImg.onerror = () => resolve(aiResultUrl);
+
+      origImg.src = originalSrc;
+      aiImg.src = aiResultUrl;
+      maskImg.src = maskUrl;
+    });
+  }, []);
+
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!showGoldenRatio || !linePositions || !overlayCanvasRef.current) return;
+
+    const rect = overlayCanvasRef.current.getBoundingClientRect();
+    const scaleY = overlayCanvasRef.current.height / rect.height;
+    const clickY = (e.clientY - rect.top) * scaleY;
+
+    const threshold = 14;
+    const keys: Array<keyof typeof linePositions> = ["trichion", "glabella", "subnasale", "menton"];
+
+    for (const key of keys) {
+      if (Math.abs(linePositions[key] - clickY) < threshold) {
+        setActiveDraggingLine(key);
+        break;
+      }
     }
   };
 
-  const loadSamplePortrait = () => {
-    const sampleUrl = createSamplePatientPortraitDataUrl();
-    setImageSrc(sampleUrl);
-    setResultImage(null);
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!activeDraggingLine || !linePositions || !overlayCanvasRef.current) return;
+
+    const rect = overlayCanvasRef.current.getBoundingClientRect();
+    const scaleY = overlayCanvasRef.current.height / rect.height;
+    const newY = (e.clientY - rect.top) * scaleY;
+
+    const updated = {
+      ...linePositions,
+      [activeDraggingLine]: newY,
+    };
+
+    setLinePositions(updated);
+    recalculateMetricsFromLines(updated);
   };
 
-  const runSimulation = async () => {
-    if (!imageSrc || selectedProcedures.length === 0) return;
-    setIsProcessing(true);
-    const startTime = Date.now();
+  const handleCanvasMouseUp = () => {
+    setActiveDraggingLine(null);
+  };
+
+  const handleGeneratePreview = async () => {
+    if (!croppedImageSrc || !maskDataUrl) return;
+
+    setLoading(true);
+    setErrorMessage(null);
 
     try {
-      setStatusText("Connecting to AI Simulation Engine...");
-      await new Promise((r) => setTimeout(r, 600));
+      const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
+      let maxStrength = 0.45;
+      let targetImage = croppedImageSrc;
 
-      setStatusText("Mapping Anatomical Guidelines & Malar Targets...");
-      await new Promise((r) => setTimeout(r, 700));
-
-      setStatusText("Executing Photorealistic AI Simulation...");
-
-      const promptText = selectedProcedures
-        .map((p) => `- ${configs[p].label}: ${configs[p].preset} (Intensity: ${configs[p].intensity}%)`)
-        .join("\n");
-
-      let simulatedResultUrl = await runGeminiImageSimulation(imageSrc, promptText, geminiApiKey);
-      let engineLabel = "Gemini 3.1 Flash AI Engine";
-
-      if (!simulatedResultUrl) {
-        engineLabel = "Anatomical Sculpt Engine";
-        simulatedResultUrl = await generateLocalSculptedSimulation(imageSrc, selectedProcedures, configs);
+      if (selectedFeatures.includes("chin")) {
+        const chinConfig = CHIN_TECHNIQUES[chinTechnique];
+        promptParts.push(chinConfig.prompt_suffix);
+        maxStrength = Math.max(maxStrength, chinConfig.strength);
       }
 
-      if (activeFacility) {
-        setFacilities((prev) =>
-          prev.map((f) =>
-            f.id === activeFacility.id ? { ...f, simulationsUsed: f.simulationsUsed + 1 } : f
-          )
-        );
-        setActiveFacility((prev) => (prev ? { ...prev, simulationsUsed: prev.simulationsUsed + 1 } : null));
+      if (selectedFeatures.includes("cheeks")) {
+        const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
+        const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+        promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
+        maxStrength = Math.max(maxStrength, cheekDosageConfig.strength);
       }
 
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 2200) {
-        await new Promise((r) => setTimeout(r, 2200 - elapsed));
+      if (selectedFeatures.includes("brows")) {
+        promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
+        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.62);
       }
 
-      setUsedEngine(engineLabel);
-      setResultImage(simulatedResultUrl);
-    } catch (err) {
-      const fallback = await generateLocalSculptedSimulation(imageSrc, selectedProcedures, configs);
-      setResultImage(fallback);
-      setUsedEngine("Anatomical Sculpt Engine");
+      if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
+        promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
+        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.50);
+      }
+
+      if (selectedFeatures.includes("nose")) {
+        const noseConfig = NOSE_TECHNIQUES[noseTechnique];
+        promptParts.push(noseConfig.prompt_suffix);
+        maxStrength = Math.max(maxStrength, noseConfig.strength);
+
+        const warped = generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
+        if (warped) targetImage = warped;
+      }
+
+      const compositePrompt = promptParts.join(" ");
+
+      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
+        input: {
+          prompt: compositePrompt,
+          negative_prompt: "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
+          image_url: targetImage,
+          mask_url: maskDataUrl,
+          strength: maxStrength,
+          enable_safety_checker: true,
+        },
+      });
+
+      if (result.data?.images?.[0]?.url) {
+        const rawAiUrl = result.data.images[0].url;
+        const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
+        setResultImage(featheredUrl);
+      } else {
+        setErrorMessage("AI simulation failed to return an image.");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
+      setErrorMessage(msg);
     } finally {
-      setIsProcessing(false);
-      setStatusText("");
+      setLoading(false);
     }
   };
 
-  const handleCompleteRegistration = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!regAdminForm.email || !regFacilityForm.name) return;
+  const handleExportPDF = () => {
+    if (!croppedImageSrc || !resultImage) return;
 
-    const facId = `fac_${Date.now().toString().slice(-4)}`;
-    const profId = `usr_${Date.now().toString().slice(-4)}`;
-    const tier = SUBSCRIPTION_TIERS[selectedTierForRegister];
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
 
-    const newFacility: Facility = {
-      id: facId,
-      name: regFacilityForm.name,
-      licenseNumber: regFacilityForm.licenseNumber || `LIC-${Math.floor(100000 + Math.random() * 900000)}`,
-      email: regAdminForm.email,
-      phone: regFacilityForm.phone || "Not provided",
-      address: regFacilityForm.address || "Medical Facility Address",
-      tierId: selectedTierForRegister,
-      simulationsUsed: 0,
-      simulationsLimit: tier.simulations === "Unlimited" ? 99999 : parseInt(tier.simulations),
-      status: "active",
-      registeredDate: new Date().toISOString().split("T")[0],
-    };
+    const procedureList = selectedFeatures.map((f) => f.toUpperCase()).join(", ");
 
-    const newAdminProfile: Profile = {
-      id: profId,
-      facilityId: facId,
-      fullName: regAdminForm.fullName,
-      email: regAdminForm.email,
-      role: "facility_admin",
-      title: regAdminForm.title || "Facility Director",
-      createdAt: new Date().toISOString().split("T")[0],
-    };
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Face-off.ai — Patient Consultation Summary</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #0f172a; max-width: 800px; margin: 0 auto; }
+            .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+            .title { font-size: 24px; font-weight: bold; font-family: serif; }
+            .subtitle { font-size: 12px; color: #64748b; }
+            .section { margin-bottom: 20px; }
+            .grid { display: flex; gap: 20px; margin-top: 15px; }
+            .card { flex: 1; text-align: center; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px; }
+            .card img { width: 100%; height: auto; border-radius: 6px; }
+            .metrics { background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0; font-family: monospace; font-size: 12px; }
+            .disclaimer { font-size: 10px; color: #94a3b8; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="title">Face-off.ai</div>
+              <div class="subtitle">Clinical Aesthetic Procedure Simulation Summary</div>
+            </div>
+            <div style="text-align: right; font-size: 11px; color: #64748b;">
+              Date: ${new Date().toLocaleDateString()}<br/>
+              Selected Procedures: <strong>${procedureList}</strong>
+            </div>
+          </div>
 
-    setFacilities((prev) => [newFacility, ...prev]);
-    setProfiles((prev) => [newAdminProfile, ...prev]);
-    setActiveFacility(newFacility);
-    setActiveProfile(newAdminProfile);
+          <div class="section">
+            <h3>Visual Transformation Simulation</h3>
+            <div class="grid">
+              <div class="card">
+                <img src="${croppedImageSrc}" />
+                <p><strong>BEFORE (Baseline)</strong></p>
+              </div>
+              <div class="card">
+                <img src="${resultImage}" />
+                <p><strong>AFTER (${procedureList})</strong></p>
+              </div>
+            </div>
+          </div>
 
-    setRegistrationMsg(`Success! ${newFacility.name} auto-provisioned with Admin ${newAdminProfile.fullName}.`);
+          ${
+            fullFacePhi
+              ? `
+          <div class="section">
+            <h3>Facial Proportion Analysis (Rule of Thirds / Divine Φ)</h3>
+            <div class="metrics">
+              <p>Height/Width Ratio: <strong>${fullFacePhi.facePhiRatio}</strong> (Ideal Φ = 1.618)</p>
+              <p>Vertical Thirds Ratio (Upper : Mid : Lower): <strong>${fullFacePhi.verticalThirdsRatio}</strong></p>
+              <p>Facial Geometry Score: <strong>${fullFacePhi.overallScore}</strong></p>
+            </div>
+          </div>
+          `
+              : ""
+          }
 
-    setTimeout(() => {
-      setRegistrationMsg("");
-      setRegStep(1);
-      setRegAdminForm({ fullName: "", email: "", password: "", title: "Medical Director" });
-      setRegFacilityForm({ name: "", licenseNumber: "", phone: "", address: "" });
-      setActiveTab("facility_portal");
-    }, 1500);
+          <div class="disclaimer">
+            <strong>Medical Disclaimer:</strong> This visual simulation is provided for consultation and educational purposes only. It does not constitute a surgical guarantee. Final treatment plans depend on in-person clinical assessment by a licensed physician.
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
-
-  const handleStaffSignIn = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError("");
-
-    const matchedProfile = profiles.find((p) => p.email.toLowerCase() === authForm.email.toLowerCase());
-    if (matchedProfile) {
-      const matchedFac = facilities.find((f) => f.id === matchedProfile.facilityId);
-      setActiveProfile(matchedProfile);
-      setActiveFacility(matchedFac || null);
-      setActiveTab("visualizer");
-      setAuthForm({ email: "", password: "" });
-    } else {
-      setAuthError("No registered practitioner found with this email. Please register your facility first.");
-    }
-  };
-
-  const navItems = [
-    { id: "visualizer", label: "🔬 AI Visualizer" },
-    { id: "pricing", label: "💳 Subscription Tiers" },
-    { id: "facility_portal", label: "🏥 Facility Portal" },
-    { id: "super_admin", label: "👑 Super Admin" },
-  ];
-
-  /* Viewport image transform style for Face Zoom */
-  const viewportTransformStyle: React.CSSProperties = isFaceZoomOn && imageSrc
-    ? {
-        transform: `scale(${faceZoomTransform.scale})`,
-        transformOrigin: `${faceZoomTransform.originX}% ${faceZoomTransform.originY}%`,
-        transition: "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform-origin 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
-      }
-    : {
-        transform: "scale(1)",
-        transformOrigin: "center center",
-        transition: "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
-      };
 
   return (
-    <div
-      className={`min-h-[100dvh] flex flex-col lg:flex-row font-sans selection:bg-amber-500 selection:text-black transition-colors duration-300 ${
-        isDark ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"
-      }`}
-      style={{ fontFamily: "'Avenir Next', 'Avenir', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}
-    >
-      {}
-      <aside className={`hidden lg:flex flex-col w-64 border-r shrink-0 sticky top-0 h-[100dvh] z-30 transition-colors duration-300 ${
-        isDark ? "bg-slate-950/90 border-slate-800" : "bg-white border-slate-200 shadow-sm"
-      }`}>
-        <div className="p-6 border-b border-slate-800/60 flex items-center justify-between">
-          <div>
-            <span className={`text-xl font-bold tracking-wider cursor-pointer ${isDark ? "text-amber-200" : "text-amber-700"}`} onClick={() => setActiveTab("visualizer")}>
-              Face-off.ai
-            </span>
-            <span className="block text-[10px] uppercase tracking-widest font-mono text-amber-500 mt-0.5">
-              Clinical Platform
-            </span>
+    <div className="max-w-5xl mx-auto p-6 space-y-6 text-white bg-gray-950 min-h-screen select-none">
+      <div className="border-b border-gray-800 pb-4 flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
+          <p className="text-gray-400 text-sm">Multi-Feature Facial Aesthetic Procedure Simulator</p>
+        </div>
+        <button
+          onClick={() => setShowGoldenRatio(!showGoldenRatio)}
+          className={`px-3 py-1.5 rounded-md text-xs font-mono border transition ${
+            showGoldenRatio ? "bg-indigo-900/50 border-indigo-500 text-indigo-200" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
+          }`}
+        >
+          {showGoldenRatio ? "✓ Draggable Grid On" : "+ Enable Draggable Grid"}
+        </button>
+      </div>
+
+      {errorMessage && (
+        <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-lg text-red-200 text-sm">
+          {errorMessage}
+        </div>
+      )}
+
+      {/* Control Panel */}
+      <div className="bg-gray-900 p-5 rounded-xl border border-gray-800 space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-amber-200 uppercase tracking-wider mb-2">
+            1. Select Target Procedures
+          </label>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+            {[
+              { id: "chin" as const, label: "Chin" },
+              { id: "cheeks" as const, label: "Cheeks" },
+              { id: "nose" as const, label: "Rhinoplasty" },
+              { id: "brows" as const, label: "Eyebrows" },
+              { id: "upper_lip" as const, label: "Upper Lip" },
+              { id: "lower_lip" as const, label: "Lower Lip" },
+            ].map((f) => {
+              const active = selectedFeatures.includes(f.id);
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => toggleFeature(f.id)}
+                  className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition ${
+                    active
+                      ? "bg-amber-600/20 border-amber-500 text-amber-200 font-bold"
+                      : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750"
+                  }`}
+                >
+                  <span>{f.label}</span>
+                  <span className="text-xs">{active ? "✓" : "+"}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="px-6 py-4 border-b border-slate-800/40">
-          {activeProfile && activeFacility ? (
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs font-mono">
-              <span className="text-amber-400 font-bold block truncate">{activeFacility.name}</span>
-              <span className="text-slate-400 block truncate">{activeProfile.fullName}</span>
-              <span className="text-[10px] text-slate-500 capitalize">{activeProfile.role.replace("_", " ")}</span>
-            </div>
-          ) : (
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono text-slate-400">
-              <span>Guest / Demo Session</span>
-              <button
-                onClick={() => setActiveTab("auth")}
-                className="mt-2 text-[11px] text-amber-400 underline block"
+        {/* Sub-Controls Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-gray-800">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Upload Photo</label>
+            <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm text-gray-300 w-full" />
+          </div>
+
+          {/* Chin Selector */}
+          {selectedFeatures.includes("chin") && (
+            <div>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Chin Procedure Preset</label>
+              <select
+                value={chinTechnique}
+                onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
+                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
-                Sign In to Clinic
-              </button>
+                {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
+                  <option key={key} value={key}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Cheek Selector */}
+          {selectedFeatures.includes("cheeks") && (
+            <div className="space-y-2">
+              <label className="block text-xs text-amber-300 font-medium">Cheek Technique & Volume</label>
+              <div className="flex gap-2">
+                <select
+                  value={cheekTechnique}
+                  onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
+                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs flex-1 font-medium"
+                >
+                  {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
+                    <option key={key} value={key}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={cheekDosage}
+                  onChange={(e) => setCheekDosage(e.target.value)}
+                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-28 font-medium"
+                >
+                  <option value="0.50ml">0.50 mL/side</option>
+                  <option value="1.00ml">1.00 mL/side</option>
+                  <option value="1.50ml">1.50 mL/side</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Nose Design Selector */}
+          {selectedFeatures.includes("nose") && (
+            <div>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Rhinoplasty Preset</label>
+              <select
+                value={noseTechnique}
+                onChange={(e) => setNoseTechnique(e.target.value as keyof typeof NOSE_TECHNIQUES)}
+                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
+              >
+                {Object.entries(NOSE_TECHNIQUES).map(([key, item]) => (
+                  <option key={key} value={key}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Eyebrow Selector */}
+          {selectedFeatures.includes("brows") && (
+            <div className="space-y-2">
+              <label className="block text-xs text-gray-400">Eyebrow Style & Thickness</label>
+              <div className="flex gap-2">
+                <select
+                  value={browTechnique}
+                  onChange={(e) => setBrowTechnique(e.target.value as keyof typeof BROW_TECHNIQUES)}
+                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
+                >
+                  <option value="ombre_powder">Ombré Powder</option>
+                  <option value="microblading">Microblading</option>
+                  <option value="hybrid_tint">Hybrid Tint</option>
+                </select>
+
+                <select
+                  value={browThickness}
+                  onChange={(e) => setBrowThickness(e.target.value as "thin" | "medium" | "thick")}
+                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
+                >
+                  <option value="thin">Thin</option>
+                  <option value="medium">Medium</option>
+                  <option value="thick">Thick</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Lip Selector */}
+          {(selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Lip Technique & Dosage</label>
+              <div className="flex gap-2">
+                <select
+                  value={lipTechnique}
+                  onChange={(e) => setLipTechnique(e.target.value as keyof typeof LIP_TECHNIQUES)}
+                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
+                >
+                  <option value="russian">Russian Lift</option>
+                  <option value="classic_lip">Classic 3D</option>
+                </select>
+                <select
+                  value={lipDosage}
+                  onChange={(e) => setLipDosage(e.target.value)}
+                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
+                >
+                  <option value="0.25ml">0.25ml</option>
+                  <option value="0.50ml">0.50ml</option>
+                  <option value="0.75ml">0.75ml</option>
+                  <option value="1.00ml">1.00ml</option>
+                </select>
+              </div>
             </div>
           )}
         </div>
+      </div>
 
-        <nav className="flex-1 p-4 space-y-1.5 text-xs font-medium">
-          {navItems.map((item) => {
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id as any)}
-                className={`w-full min-h-[44px] px-4 py-3 rounded-xl transition text-left flex items-center justify-between ${
-                  isActive
-                    ? isDark
-                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold"
-                      : "bg-amber-50 text-amber-900 border border-amber-500/30 font-semibold shadow-sm"
-                    : isDark
-                      ? "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                }`}
-              >
-                <span>{item.label}</span>
-                {isActive && <span className="text-amber-400">●</span>}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="p-4 border-t border-slate-800/60 space-y-2">
-          <button
-            onClick={() => setShowApiKeyModal(!showApiKeyModal)}
-            className={`w-full min-h-[44px] px-3 py-2 rounded-xl border text-xs font-mono transition flex items-center justify-between ${
-              geminiApiKey
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span>🔑 Gemini AI</span>
-            <span>{geminiApiKey ? "Active" : "Set Key"}</span>
-          </button>
-
-          <button
-            onClick={() => setTheme(isDark ? "light" : "dark")}
-            className={`w-full min-h-[44px] px-3 py-2 rounded-xl border text-xs font-mono transition flex items-center justify-between ${
-              isDark
-                ? "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
-                : "bg-slate-100 border-slate-300 text-slate-700 hover:border-slate-400 shadow-sm"
-            }`}
-          >
-            <span>Appearance</span>
-            <span>{isDark ? "☀️ Light" : "🌙 Dark"}</span>
-          </button>
-        </div>
-      </aside>
-
-      {/* Mobile Top Header */}
-      <header className={`lg:hidden sticky top-0 z-40 backdrop-blur-md border-b flex items-center justify-between px-6 h-16 transition-colors duration-300 ${
-        isDark ? "bg-slate-950/90 border-slate-800" : "bg-white/90 border-slate-200 shadow-sm"
-      }`}>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsMobileDrawerOpen(true)}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border border-slate-800 text-amber-400 font-bold text-lg"
-            aria-label="Open Navigation Drawer"
-          >
-            ☰
-          </button>
-          <span className={`text-lg font-bold tracking-wider ${isDark ? "text-amber-200" : "text-amber-700"}`}>
-            Face-off.ai
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setTheme(isDark ? "light" : "dark")}
-            className="min-h-[44px] px-3 py-2 rounded-xl border text-xs font-mono bg-slate-900 border-slate-800 text-slate-300"
-          >
-            {isDark ? "☀️" : "🌙"}
-          </button>
-        </div>
-      </header>
-
-      {/* Mobile Slide-over Drawer */}
-      {isMobileDrawerOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsMobileDrawerOpen(false)}></div>
-          <div className={`relative w-80 max-w-[80vw] h-full flex flex-col p-6 z-10 border-r transition-colors duration-300 ${
-            isDark ? "bg-slate-950 text-slate-100 border-slate-800" : "bg-white text-slate-900 border-slate-200"
-          }`}>
-            <div className="flex items-center justify-between pb-6 border-b border-slate-800">
-              <span className="text-lg font-bold text-amber-400">Face-off.ai Menu</span>
-              <button
-                onClick={() => setIsMobileDrawerOpen(false)}
-                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-800 text-slate-300"
-              >
-                ✕
-              </button>
-            </div>
-
-            <nav className="flex-1 py-6 space-y-2 text-sm font-medium">
-              {navItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id as any);
-                    setIsMobileDrawerOpen(false);
-                  }}
-                  className={`w-full min-h-[44px] px-4 py-3 rounded-xl text-left flex items-center justify-between ${
-                    activeTab === item.id
-                      ? "bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30"
-                      : "text-slate-400 hover:bg-slate-900"
-                  }`}
-                >
-                  <span>{item.label}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
-        </div>
-      )}
-
-      {/* API Key Modal */}
-      {showApiKeyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="w-full max-w-md p-6 rounded-2xl border bg-slate-900 border-slate-800 shadow-2xl text-xs font-mono space-y-4">
-            <h3 className="text-sm font-bold text-amber-400">🔑 Gemini Generative AI API Key</h3>
-            <p className="text-slate-400">
-              Enter a free Gemini API key to run live Generative Image Inpainting (`gemini-3.1-flash-image-preview`).
-            </p>
+      {croppedImageSrc && (
+        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl flex items-center justify-between gap-4 text-xs font-mono">
+          <span className="text-gray-400">Viewport Framing (Zoom Scale):</span>
+          <div className="flex items-center gap-3 flex-1 max-w-xs">
+            <span className="text-gray-500">Zoom In</span>
             <input
-              type="password"
-              placeholder="AIzaSy..."
-              value={geminiApiKey}
-              onChange={(e) => setGeminiApiKey(e.target.value)}
-              className="w-full text-base px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono"
+              type="range"
+              min="50"
+              max="200"
+              value={zoomScale}
+              onChange={(e) => setZoomScale(Number(e.target.value))}
+              className="w-full accent-amber-500 cursor-pointer"
             />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowApiKeyModal(false)}
-                className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-700 text-slate-300"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => setShowApiKeyModal(false)}
-                className="min-h-[44px] px-6 py-2 rounded-xl bg-amber-400 text-slate-950 font-bold"
-              >
-                Save
-              </button>
+            <span className="text-gray-500">Zoom Out</span>
+          </div>
+          <span className="text-amber-400 font-bold min-w-[45px] text-right">{zoomScale}%</span>
+        </div>
+      )}
+
+      {fullFacePhi && (
+        <div className="bg-indigo-950/40 border border-indigo-500/30 p-4 rounded-xl space-y-2 text-xs font-mono">
+          <div className="flex justify-between items-center border-b border-indigo-900/50 pb-2">
+            <span className="text-amber-400 font-bold">FULL FACE RULE OF THIRDS (Φ = 1.618)</span>
+            <span className="text-indigo-300">Divine Match: <strong>{fullFacePhi.overallScore}</strong></span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300 pt-1">
+            <div>
+              <span className="text-gray-400 block">Height / Width Ratio:</span>
+              <strong className="text-white text-sm">{fullFacePhi.facePhiRatio}</strong>
+              <span className="text-[10px] text-gray-500 block">(Target Φ = 1.618)</span>
+            </div>
+            <div>
+              <span className="text-gray-400 block">Vertical Thirds (Upper : Mid : Lower):</span>
+              <strong className="text-white text-sm">{fullFacePhi.verticalThirdsRatio}</strong>
+              <span className="text-[10px] text-gray-500 block">(Target = 1.0 : 1.0 : 1.0)</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Main Workspace */}
-      <main className="flex-1 p-4 sm:p-8 max-w-7xl mx-auto w-full overflow-x-hidden">
-        {activeTab === "visualizer" && (
-          <div>
-            {}
-            <div className={`mb-6 pb-6 border-b flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-              isDark ? "border-slate-800/80" : "border-slate-200"
-            }`}>
-              <div>
-                <h1 className={`text-2xl font-bold tracking-tight ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                  Aesthetic Procedure AI Visualizer
-                </h1>
-                <p className={`text-xs font-mono mt-1 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                  Anatomically targeted rhinoplasty, malar cheek projection, dermal filler volume, and facial contouring visualizer.
-                </p>
-              </div>
-            </div>
+      <div className="flex justify-end">
+        <button
+          onClick={handleGeneratePreview}
+          disabled={!mappedLandmarks || loading}
+          className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md"
+        >
+          {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
+        </button>
+      </div>
 
-            <div className={`p-6 rounded-2xl border mb-8 ${
-              isDark ? "bg-slate-900/60 border-slate-800 shadow-xl" : "bg-white border-slate-200 shadow-md"
-            }`}>
-              <h2 className={`text-xs font-mono uppercase tracking-widest mb-4 ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-                1. Select Target Procedures
-              </h2>
+      <canvas ref={canvasRef} className="hidden" />
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-6">
-                {PROCEDURES_LIST.map((proc) => {
-                  const active = selectedProcedures.includes(proc.id);
-                  return (
-                    <button
-                      key={proc.id}
-                      onClick={() => toggleProcedure(proc.id)}
-                      className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-medium border transition flex items-center justify-between ${
-                        active
-                          ? isDark
-                            ? "border-amber-500/60 bg-amber-500/15 text-amber-300 shadow-sm shadow-amber-500/10"
-                            : "border-amber-500 bg-amber-50 text-amber-900 shadow-sm"
-                          : isDark
-                            ? "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700"
-                            : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300"
-                      }`}
-                    >
-                      <span>{proc.label}</span>
-                      <span className="text-xs font-mono">{active ? "✓" : "+"}</span>
-                    </button>
-                  );
-                })}
-              </div>
+      {croppedImageSrc && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-sm font-medium text-amber-200">
+              {resultImage ? "Multi-Procedure Before & After Comparison:" : "Interactive Facial Canvas (Drag Lines to Adjust):"}
+            </p>
+            {resultImage && (
+              <button
+                onClick={handleExportPDF}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition"
+              >
+                📄 Export Patient Summary (PDF)
+              </button>
+            )}
+          </div>
 
-              {selectedProcedures.length > 0 ? (
-                <div className={`mb-6 pt-6 border-t ${isDark ? "border-slate-800/80" : "border-slate-200"}`}>
-                  <h2 className={`text-xs font-mono uppercase tracking-widest mb-4 ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-                    2. Active Procedure Presets ({selectedProcedures.length} Selected)
-                  </h2>
+          <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
+            {resultImage ? (
+              <div className="relative w-full aspect-square select-none touch-none">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedProcedures.map((procId) => {
-                      const conf = configs[procId];
-                      const presets = PRESET_OPTIONS[procId] || [];
-
-                      return (
-                        <div
-                          key={procId}
-                          className={`p-4 rounded-xl border ${
-                            isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200 shadow-sm"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-bold font-mono tracking-wider text-amber-400 uppercase">
-                              {conf.label} Configuration
-                            </span>
-                            <span className="text-[11px] font-mono text-slate-400">
-                              Magnitude: {conf.intensity}%
-                            </span>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-[11px] font-mono text-slate-400 mb-1">
-                                Anatomical Target Preset
-                              </label>
-                              <select
-                                value={conf.preset}
-                                onChange={(e) => updateConfig(procId, "preset", e.target.value)}
-                                className={`w-full text-base min-h-[44px] px-3 py-2 rounded-lg border font-medium transition cursor-pointer ${
-                                  isDark
-                                    ? "bg-slate-900 border-slate-700 text-slate-100 focus:border-amber-500"
-                                    : "bg-white border-slate-300 text-slate-900 focus:border-amber-500 shadow-sm"
-                                }`}
-                              >
-                                {presets.map((presetOption, idx) => (
-                                  <option key={idx} value={presetOption}>
-                                    {presetOption}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <div className="flex justify-between items-center text-[11px] font-mono text-slate-400 mb-1">
-                                <span>Volumetric Scale</span>
-                                <span>{conf.intensity}%</span>
-                              </div>
-                              <input
-                                type="range"
-                                min="10"
-                                max="100"
-                                value={conf.intensity}
-                                onChange={(e) => updateConfig(procId, "intensity", Number(e.target.value))}
-                                className="w-full accent-amber-400 cursor-pointer h-2 rounded-lg bg-slate-700"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className={`p-4 rounded-xl border mb-6 text-center text-xs font-mono text-slate-400 ${
-                  isDark ? "bg-slate-950/40 border-slate-800/60" : "bg-slate-50 border-slate-200"
-                }`}>
-                  Click procedure targets above (e.g. Cheeks, Rhinoplasty) to configure anatomical preset options.
-                </div>
-              )}
-
-              <div className={`pt-4 border-t flex flex-col sm:flex-row items-center justify-between gap-4 ${
-                isDark ? "border-slate-800/80" : "border-slate-200"
-              }`}>
-                <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    className={`block text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold cursor-pointer ${
-                      isDark
-                        ? "text-slate-400 file:bg-slate-800 file:text-slate-200"
-                        : "text-slate-600 file:bg-slate-200 file:text-slate-800"
-                    }`}
-                  />
-                  <button
-                    onClick={loadSamplePortrait}
-                    className={`min-h-[44px] text-xs px-3.5 py-2 rounded-xl font-mono border transition ${
-                      isDark
-                        ? "bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700"
-                        : "bg-slate-100 hover:bg-slate-200 text-amber-800 border-slate-300"
-                    }`}
-                  >
-                    👤 Sample Patient
-                  </button>
-                  <button
-                    onClick={() => setIsFaceZoomOn(!isFaceZoomOn)}
-                    className={`min-h-[44px] text-xs px-3.5 py-2 rounded-xl font-mono border transition ${
-                      isFaceZoomOn
-                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                        : "bg-slate-800 text-slate-400 border-slate-700"
-                    }`}
-                  >
-                    🔍 {isFaceZoomOn ? `Face Focus (${faceZoomTransform.scale}x)` : "Full View"}
-                  </button>
-                  <button
-                    onClick={() => setIsGridOn(!isGridOn)}
-                    className={`min-h-[44px] text-xs px-3.5 py-2 rounded-xl font-mono border transition ${
-                      isGridOn
-                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                        : "bg-slate-800 text-slate-400 border-slate-700"
-                    }`}
-                  >
-                    📐 {isGridOn ? "Grid On" : "Grid Off"}
-                  </button>
-                </div>
-
-                <button
-                  onClick={runSimulation}
-                  disabled={!imageSrc || isProcessing || selectedProcedures.length === 0}
-                  className={`min-h-[44px] px-8 py-3 rounded-xl text-xs font-semibold transition shadow-lg flex items-center justify-center gap-2 w-full sm:w-auto ${
-                    !imageSrc || isProcessing || selectedProcedures.length === 0
-                      ? isDark ? "bg-slate-800 text-slate-500 cursor-not-allowed" : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                      : "bg-amber-400 hover:bg-amber-300 text-gray-950"
-                  }`}
+                <div
+                  className="absolute inset-y-0 left-0 overflow-hidden"
+                  style={{ width: `${sliderPos}%` }}
                 >
-                  {isProcessing ? (
-                    <span className="flex items-center gap-2">
-                      <span className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-slate-950"></span>
-                      {statusText || "Processing..."}
-                    </span>
-                  ) : (
-                    `Run AI Simulation (${selectedProcedures.length} Selected)`
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Viewports */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {}
-              <div className={`p-6 rounded-2xl border flex flex-col items-center justify-center min-h-[480px] relative overflow-hidden ${
-                isDark ? "bg-slate-900/40 border-slate-800/80" : "bg-white border-slate-200 shadow-md"
-              }`}>
-                <h3 className={`text-xs font-mono uppercase tracking-widest mb-4 self-start ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                  Baseline Patient Photo
-                </h3>
-                {imageSrc ? (
-                  <div className="relative max-h-[420px] overflow-hidden rounded-xl inline-block">
-                    <img
-                      src={imageSrc}
-                      alt="Baseline"
-                      style={viewportTransformStyle}
-                      className="max-h-[420px] object-contain rounded-xl block"
-                    />
-                    {isGridOn && (
-                      <div className="absolute inset-0 border border-amber-500/30 pointer-events-none rounded-xl grid grid-cols-3 grid-rows-3 opacity-40">
-                        <div className="border-r border-b border-amber-500/30"></div>
-                        <div className="border-r border-b border-amber-500/30"></div>
-                        <div className="border-b border-amber-500/30"></div>
-                        <div className="border-r border-b border-amber-500/30"></div>
-                        <div className="border-r border-b border-amber-500/30"></div>
-                        <div className="border-b border-amber-500/30"></div>
-                        <div className="border-r border-amber-500/30"></div>
-                        <div className="border-r border-amber-500/30"></div>
-                        <div></div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">No Patient Photo Loaded</p>
-                )}
-              </div>
-
-              {/* Simulated Outcome Viewport */}
-              <div className={`p-6 rounded-2xl border flex flex-col items-center justify-center min-h-[480px] relative overflow-hidden ${
-                isDark ? "bg-slate-900/40 border-slate-800/80" : "bg-white border-slate-200 shadow-md"
-              }`}>
-                <div className="flex items-center justify-between w-full mb-4">
-                  <h3 className={`text-xs font-mono uppercase tracking-widest ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-                    Simulated Clinical Outcome
-                  </h3>
-                  {usedEngine && !isProcessing && (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300">
-                      {usedEngine}
-                    </span>
-                  )}
-                </div>
-
-                {isProcessing ? (
-                  <div className="relative w-full flex flex-col items-center justify-center min-h-[380px] p-2 text-center">
-                    <style>{`
-                      @keyframes scanLine {
-                        0% { top: 2%; opacity: 0.8; }
-                        50% { top: 94%; opacity: 1; }
-                        100% { top: 2%; opacity: 0.8; }
-                      }
-                      .animate-laser-scan {
-                        animation: scanLine 2.4s ease-in-out infinite;
-                      }
-                      @keyframes radarSweep {
-                        0% { transform: rotate(0deg); }
-                        100% { transform: rotate(360deg); }
-                      }
-                      .animate-radar-sweep {
-                        animation: radarSweep 4s linear infinite;
-                      }
-                    `}</style>
-
-                    <div className="relative max-h-[380px] overflow-hidden rounded-xl inline-block border border-amber-500/40 shadow-2xl shadow-amber-500/10">
-                      {imageSrc ? (
-                        <img
-                          src={imageSrc}
-                          alt="Scanning Target"
-                          style={viewportTransformStyle}
-                          className="max-h-[380px] object-contain rounded-xl block opacity-30 blur-[1px] grayscale"
-                        />
-                      ) : (
-                        <div className="w-[280px] h-[380px] bg-slate-900 rounded-xl"></div>
-                      )}
-
-                      <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_18px_#fbbf24] animate-laser-scan z-10 pointer-events-none"></div>
-
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-40 h-40 rounded-full border border-amber-500/40 border-dashed animate-radar-sweep flex items-center justify-center">
-                          <div className="w-24 h-24 rounded-full border border-amber-400/30 animate-ping"></div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-col items-center gap-1.5">
-                      <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono text-xs shadow-lg shadow-amber-500/5">
-                        <span className="relative flex h-2.5 w-2.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-                        </span>
-                        <span className="font-semibold tracking-wider uppercase text-[11px]">
-                          {statusText || "AI Processing..."}
-                        </span>
-                      </div>
-                      <p className="text-[11px] font-mono text-slate-400">
-                        Targeting {selectedProcedures.map((p) => configs[p].label).join(" • ")}
-                      </p>
-                    </div>
-                  </div>
-                ) : resultImage ? (
-                  <div className="relative w-full flex flex-col items-center justify-center">
-                    <div className="relative max-h-[420px] overflow-hidden rounded-xl inline-block">
-                      <img
-                        src={imageSrc || ""}
-                        alt="Baseline Under"
-                        style={viewportTransformStyle}
-                        className="max-h-[420px] object-contain rounded-xl block"
-                      />
-
-                      <div
-                        className="absolute top-0 left-0 bottom-0 overflow-hidden rounded-xl"
-                        style={{ width: `${wipePercent}%` }}
-                      >
-                        <img
-                          src={resultImage}
-                          alt="Simulated Result"
-                          style={viewportTransformStyle}
-                          className="max-h-[420px] object-contain rounded-xl block max-w-none"
-                        />
-                      </div>
-
-                      <div
-                        className="absolute top-0 bottom-0 w-0.5 bg-amber-400 shadow-lg pointer-events-none"
-                        style={{ left: `${wipePercent}%` }}
-                      >
-                        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-amber-400 text-slate-950 text-[10px] flex items-center justify-center font-bold">
-                          ↔
-                        </div>
-                      </div>
-
-                      {isGridOn && (
-                        <div className="absolute inset-0 border border-amber-500/30 pointer-events-none rounded-xl grid grid-cols-3 grid-rows-3 opacity-40">
-                          <div className="border-r border-b border-amber-500/30"></div>
-                          <div className="border-r border-b border-amber-500/30"></div>
-                          <div className="border-b border-amber-500/30"></div>
-                          <div className="border-r border-b border-amber-500/30"></div>
-                          <div className="border-r border-b border-amber-500/30"></div>
-                          <div className="border-b border-amber-500/30"></div>
-                          <div className="border-r border-amber-500/30"></div>
-                          <div className="border-r border-amber-500/30"></div>
-                          <div></div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="w-full max-w-xs mt-4 flex items-center gap-3">
-                      <span className="text-[10px] font-mono text-slate-400">Before</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={wipePercent}
-                        onChange={(e) => setWipePercent(Number(e.target.value))}
-                        className="w-full accent-amber-400 h-2 rounded bg-slate-700 cursor-pointer"
-                      />
-                      <span className="text-[10px] font-mono text-amber-400">Simulated</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">Simulation Pending</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Pricing Tab */}
-        {activeTab === "pricing" && (
-          <div className="max-w-5xl mx-auto py-8">
-            <h2 className="text-2xl font-bold text-center mb-2">Subscription Tiers & Clinical Access</h2>
-            <p className="text-xs text-slate-400 text-center mb-10 font-mono">Select a plan to onboard your clinic and manage practitioner seats.</p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {Object.values(SUBSCRIPTION_TIERS).map((tier) => (
-                <div key={tier.id} className={`p-6 rounded-2xl border flex flex-col justify-between ${
-                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200 shadow-md"
-                }`}>
-                  <div>
-                    <span className={`text-[10px] uppercase font-mono px-2.5 py-1 rounded border ${tier.badgeColor}`}>
-                      {tier.name}
-                    </span>
-                    <div className="mt-4 mb-2">
-                      <span className="text-3xl font-bold">${tier.priceMonthly}</span>
-                      <span className="text-xs text-slate-500 font-mono"> / month</span>
-                    </div>
-                    <ul className="space-y-2 my-6 text-xs text-slate-300">
-                      {tier.features.map((feat, idx) => (
-                        <li key={idx} className="flex items-center gap-2">
-                          <span className="text-amber-400">✓</span> {feat}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setSelectedTierForRegister(tier.id);
-                      setRegStep(1);
-                      setActiveTab("register");
-                    }}
-                    className="w-full min-h-[44px] py-2.5 rounded-xl text-xs font-semibold bg-amber-400 hover:bg-amber-300 text-slate-950 transition"
-                  >
-                    Register Facility Under Plan
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Register Facility Onboarding Tab */}
-        {activeTab === "register" && (
-          <div className="max-w-xl mx-auto py-8">
-            <div className={`p-8 rounded-2xl border ${isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-md"}`}>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">Facility Onboarding Wizard</h2>
-                <span className="text-xs font-mono text-amber-400">Step {regStep} of 3</span>
-              </div>
-
-              {registrationMsg && (
-                <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono">
-                  {registrationMsg}
-                </div>
-              )}
-
-              {regStep === 1 && (
-                <form onSubmit={(e) => { e.preventDefault(); setRegStep(2); }} className="space-y-4">
-                  <h3 className="text-xs font-mono text-amber-400 uppercase tracking-widest">Step 1: Primary Administrator Setup</h3>
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">Full Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={regAdminForm.fullName}
-                      onChange={(e) => setRegAdminForm({ ...regAdminForm, fullName: e.target.value })}
-                      placeholder="Dr. Alexander Wright, MD"
-                      className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">Clinical Email Address *</label>
-                    <input
-                      type="email"
-                      required
-                      value={regAdminForm.email}
-                      onChange={(e) => setRegAdminForm({ ...regAdminForm, email: e.target.value })}
-                      placeholder="director@facility.com"
-                      className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">Account Password *</label>
-                    <input
-                      type="password"
-                      required
-                      value={regAdminForm.password}
-                      onChange={(e) => setRegAdminForm({ ...regAdminForm, password: e.target.value })}
-                      placeholder="••••••••••••"
-                      className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full min-h-[44px] py-3 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950 mt-4"
-                  >
-                    Continue to Facility Details →
-                  </button>
-                </form>
-              )}
-
-              {regStep === 2 && (
-                <form onSubmit={(e) => { e.preventDefault(); setRegStep(3); }} className="space-y-4">
-                  <h3 className="text-xs font-mono text-amber-400 uppercase tracking-widest">Step 2: Medical Facility Profile</h3>
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">Facility Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={regFacilityForm.name}
-                      onChange={(e) => setRegFacilityForm({ ...regFacilityForm, name: e.target.value })}
-                      placeholder="e.g. Apex Aesthetic Surgery Center"
-                      className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">Medical License Number</label>
-                    <input
-                      type="text"
-                      value={regFacilityForm.licenseNumber}
-                      onChange={(e) => setRegFacilityForm({ ...regFacilityForm, licenseNumber: e.target.value })}
-                      placeholder="LIC-984210"
-                      className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">Contact Phone</label>
-                    <input
-                      type="text"
-                      value={regFacilityForm.phone}
-                      onChange={(e) => setRegFacilityForm({ ...regFacilityForm, phone: e.target.value })}
-                      placeholder="+1 (555) 234-5678"
-                      className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
-                    />
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setRegStep(1)}
-                      className="w-1/3 min-h-[44px] py-3 rounded-xl text-xs border border-slate-700 text-slate-300"
-                    >
-                      ← Back
-                    </button>
-                    <button
-                      type="submit"
-                      className="w-2/3 min-h-[44px] py-3 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950"
-                    >
-                      Review & Provision →
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {regStep === 3 && (
-                <form onSubmit={handleCompleteRegistration} className="space-y-4 font-mono text-xs">
-                  <h3 className="text-xs text-amber-400 uppercase tracking-widest">Step 3: Auto-Provisioning Confirmation</h3>
-                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                    <div><span className="text-slate-400">Plan Tier:</span> {SUBSCRIPTION_TIERS[selectedTierForRegister].name}</div>
-                    <div><span className="text-slate-400">Facility:</span> {regFacilityForm.name}</div>
-                    <div><span className="text-slate-400">Admin:</span> {regAdminForm.fullName} ({regAdminForm.email})</div>
-                    <div><span className="text-slate-400">Database Action:</span> Linking `profiles.facility_id` to `facilities.id` via Supabase RLS.</div>
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setRegStep(2)}
-                      className="w-1/3 min-h-[44px] py-3 rounded-xl border border-slate-700 text-slate-300"
-                    >
-                      ← Back
-                    </button>
-                    <button
-                      type="submit"
-                      className="w-2/3 min-h-[44px] py-3 rounded-xl font-semibold bg-emerald-400 text-slate-950"
-                    >
-                      Confirm & Provision Facility
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Staff Authentication Portal Tab */}
-        {activeTab === "auth" && (
-          <div className="max-w-md mx-auto py-8">
-            <div className={`p-8 rounded-2xl border ${isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-md"}`}>
-              <h2 className="text-xl font-bold mb-1">Staff Sign-In</h2>
-              <p className="text-xs text-slate-400 mb-6 font-mono">Multi-tenant clinical authentication portal.</p>
-
-              {authError && (
-                <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-mono">
-                  {authError}
-                </div>
-              )}
-
-              <form onSubmit={handleStaffSignIn} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 mb-1">Clinical Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={authForm.email}
-                    onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-                    placeholder="practitioner@clinic.com"
-                    className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={croppedImageSrc}
+                    alt="Before"
+                    className="absolute top-0 left-0 h-full w-full object-cover max-w-none"
+                    style={{ width: "100%", height: "100%" }}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 mb-1">Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={authForm.password}
-                    onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-                    placeholder="••••••••••••"
-                    className="w-full text-base min-h-[44px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950 text-slate-100"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full min-h-[44px] py-3 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950 mt-4"
-                >
-                  Sign In to Workspace
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
 
-        {/* Facility Portal Tab */}
-        {activeTab === "facility_portal" && (
-          <div className="max-w-5xl mx-auto py-6">
-            <h2 className="text-xl font-bold mb-2">Facility Portal & Staff Ledger</h2>
-            {facilities.length === 0 ? (
-              <div className={`p-8 rounded-2xl border text-center ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
-                <p className="text-sm text-slate-400 mb-4 font-mono">No clinical facilities registered in ledger.</p>
-                <button
-                  onClick={() => setActiveTab("register")}
-                  className="min-h-[44px] px-6 py-2.5 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950"
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={sliderPos}
+                  onChange={(e) => setSliderPos(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
+                />
+
+                <div
+                  className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10 pointer-events-none shadow-[0_0_12px_rgba(251,191,36,0.8)]"
+                  style={{ left: `${sliderPos}%` }}
                 >
-                  Onboard First Facility
-                </button>
+                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-amber-400 text-gray-950 rounded-full flex items-center justify-center font-bold text-xs shadow-lg">
+                    ↔
+                  </div>
+                </div>
+
+                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono">
+                  BEFORE
+                </span>
+                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono">
+                  AFTER ({selectedFeatures.join(" + ").toUpperCase()})
+                </span>
               </div>
             ) : (
-              <div className="space-y-6">
-                {facilities.map((fac) => {
-                  const facilityProfiles = profiles.filter((p) => p.facilityId === fac.id);
-                  return (
-                    <div key={fac.id} className={`p-6 rounded-2xl border ${isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200 shadow-md"}`}>
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h3 className="text-lg font-bold">{fac.name}</h3>
-                          <p className="text-xs font-mono text-slate-400">License: {fac.licenseNumber} • {fac.email}</p>
-                        </div>
-                        <span className={`text-[10px] font-mono uppercase px-2.5 py-1 rounded border ${SUBSCRIPTION_TIERS[fac.tierId].badgeColor}`}>
-                          {SUBSCRIPTION_TIERS[fac.tierId].name}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-950/40 border border-slate-800 text-xs font-mono mb-4">
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Simulations Run</span>
-                          <span className="text-amber-400 font-bold">{fac.simulationsUsed} / {fac.simulationsLimit}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Staff Accounts</span>
-                          <span>{facilityProfiles.length} Profiles</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Registration Date</span>
-                          <span>{fac.registeredDate}</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <span className="text-xs font-mono text-slate-400 block uppercase">Practitioner Accounts (RLS Scoped)</span>
-                        {facilityProfiles.map((p) => (
-                          <div key={p.id} className="p-3 rounded-xl border border-slate-800/80 bg-slate-950/20 text-xs font-mono flex items-center justify-between">
-                            <div>
-                              <span className="font-bold text-slate-200">{p.fullName}</span>
-                              <span className="text-slate-400 block">{p.email} • {p.title}</span>
-                            </div>
-                            <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 text-[10px] capitalize">{p.role.replace("_", " ")}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="relative w-full aspect-square">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-full object-cover pointer-events-none" />
+                <canvas
+                  ref={overlayCanvasRef}
+                  onMouseDown={handleCanvasMouseDown}
+                  onMouseMove={handleCanvasMouseMove}
+                  onMouseUp={handleCanvasMouseUp}
+                  className="absolute inset-0 w-full h-full cursor-ns-resize"
+                />
               </div>
             )}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Super Admin Metrics Tab */}
-        {activeTab === "super_admin" && (
-          <div className="max-w-5xl mx-auto py-6">
-            <h2 className="text-xl font-bold mb-2">Super Admin System Metrics</h2>
-            <p className="text-xs font-mono text-slate-400 mb-6">Cross-tenant platform statistics, credit allocations, and subscription status.</p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-              <div className="p-4 rounded-xl border bg-slate-900/60 border-slate-800">
-                <span className="text-slate-400 text-xs font-mono block">Monthly Recurring Revenue</span>
-                <span className="text-2xl font-bold text-emerald-400">
-                  ${facilities.reduce((acc, f) => acc + SUBSCRIPTION_TIERS[f.tierId].priceMonthly, 0).toLocaleString()}
-                </span>
-              </div>
-              <div className="p-4 rounded-xl border bg-slate-900/60 border-slate-800">
-                <span className="text-slate-400 text-xs font-mono block">Active Facilities</span>
-                <span className="text-2xl font-bold text-amber-400">{facilities.length}</span>
-              </div>
-              <div className="p-4 rounded-xl border bg-slate-900/60 border-slate-800">
-                <span className="text-slate-400 text-xs font-mono block">Total Simulations Executed</span>
-                <span className="text-2xl font-bold text-blue-400">
-                  {facilities.reduce((acc, f) => acc + f.simulationsUsed, 0)}
-                </span>
-              </div>
-            </div>
-
-            {facilities.length === 0 ? (
-              <p className="text-xs font-mono text-slate-500 text-center py-8">No registered facilities online.</p>
-            ) : (
-              <div className="space-y-4">
-                {facilities.map((fac) => (
-                  <div key={fac.id} className="p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 border-slate-800">
-                    <div>
-                      <span className="font-bold text-sm block">{fac.name}</span>
-                      <span className="text-xs font-mono text-slate-400">{fac.email} • {SUBSCRIPTION_TIERS[fac.tierId].name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setFacilities((prev) =>
-                            prev.map((f) => (f.id === fac.id ? { ...f, simulationsLimit: f.simulationsLimit + 100 } : f))
-                          );
-                        }}
-                        className="min-h-[44px] px-3 py-1.5 rounded border font-mono bg-amber-500/10 text-amber-300 border-amber-500/30 text-xs"
-                      >
-                        +100 Credits
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </main>
+      <footer className="text-center pt-6 border-t border-gray-900 text-xs text-gray-500">
+        <p>
+          <strong>Medical Disclaimer:</strong> This tool utilizes generative artificial intelligence for educational and patient consultation purposes only. It does not guarantee surgical or clinical outcomes. Treatment planning requires an in-person clinical consultation with a licensed physician.
+        </p>
+      </footer>
     </div>
   );
 }
