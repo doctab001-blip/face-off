@@ -36,7 +36,6 @@ export default function VisualizerApp() {
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
-  const [sliderPos, setSliderPos] = useState<number>(50);
 
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
   const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
@@ -566,54 +565,63 @@ export default function VisualizerApp() {
     [croppedImageSrc, mappedLandmarks],
   );
 
-  const applyEdgeFeathering = useCallback(
-    (originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
-      return new Promise((resolve) => {
-        const loadImage = (src: string): Promise<HTMLImageElement> => {
-          return new Promise((res, rej) => {
-            const img = new Image();
-            if (src.startsWith("http")) img.crossOrigin = "anonymous";
-            img.onload = () => res(img);
-            img.onerror = (e) => rej(e);
-            img.src = src;
-          });
-        };
+  const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const loadImage = (src: string): Promise<HTMLImageElement> => {
+        return new Promise((res, rej) => {
+          const img = new Image();
+          if (src.startsWith("http")) img.crossOrigin = "anonymous";
+          img.onload = () => res(img);
+          img.onerror = (e) => rej(e);
+          img.src = src;
+        });
+      };
 
-        Promise.all([loadImage(originalSrc), loadImage(aiResultUrl), loadImage(maskUrl)])
-          .then(([origImg, aiImg, maskImg]) => {
-            const canvas = document.createElement("canvas");
-            const width = origImg.width;
-            const height = origImg.height;
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return resolve(aiResultUrl);
+      Promise.all([loadImage(originalSrc), loadImage(aiResultUrl), loadImage(maskUrl)])
+        .then(([origImg, aiImg, maskImg]) => {
+          const width = origImg.width;
+          const height = origImg.height;
 
-            ctx.drawImage(aiImg, 0, 0, width, height);
+          // 1. Draw Original Image
+          const origCanvas = document.createElement("canvas");
+          origCanvas.width = width; origCanvas.height = height;
+          const origCtx = origCanvas.getContext("2d");
+          if (!origCtx) return resolve(aiResultUrl);
+          origCtx.drawImage(origImg, 0, 0, width, height);
+          const origData = origCtx.getImageData(0, 0, width, height);
 
-            const alphaCanvas = document.createElement("canvas");
-            alphaCanvas.width = width;
-            alphaCanvas.height = height;
-            const aCtx = alphaCanvas.getContext("2d");
-            if (!aCtx) return resolve(aiResultUrl);
+          // 2. Draw AI Image
+          const aiCanvas = document.createElement("canvas");
+          aiCanvas.width = width; aiCanvas.height = height;
+          const aiCtx = aiCanvas.getContext("2d");
+          if (!aiCtx) return resolve(aiResultUrl);
+          aiCtx.drawImage(aiImg, 0, 0, width, height);
+          const aiData = aiCtx.getImageData(0, 0, width, height);
 
-            aCtx.filter = "blur(14px)";
-            aCtx.drawImage(maskImg, 0, 0, width, height);
+          // 3. Draw and Blur the Mask
+          const maskCanvas = document.createElement("canvas");
+          maskCanvas.width = width; maskCanvas.height = height;
+          const maskCtx = maskCanvas.getContext("2d");
+          if (!maskCtx) return resolve(aiResultUrl);
+          maskCtx.filter = "blur(14px)";
+          maskCtx.drawImage(maskImg, 0, 0, width, height);
+          const maskData = maskCtx.getImageData(0, 0, width, height);
 
-            ctx.save();
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.drawImage(alphaCanvas, 0, 0);
-            ctx.globalCompositeOperation = "destination-over";
-            ctx.drawImage(origImg, 0, 0, width, height);
-            ctx.restore();
+          // 4. Pixel-by-Pixel Alpha Compositing
+          for (let i = 0; i < origData.data.length; i += 4) {
+            // Mask is greyscale, so Red channel represents brightness/alpha
+            const maskAlpha = maskData.data[i] / 255; 
+            origData.data[i] = aiData.data[i] * maskAlpha + origData.data[i] * (1 - maskAlpha);         // R
+            origData.data[i + 1] = aiData.data[i + 1] * maskAlpha + origData.data[i + 1] * (1 - maskAlpha); // G
+            origData.data[i + 2] = aiData.data[i + 2] * maskAlpha + origData.data[i + 2] * (1 - maskAlpha); // B
+          }
 
-            resolve(canvas.toDataURL("image/png"));
-          })
-          .catch(() => resolve(aiResultUrl));
-      });
-    },
-    [],
-  );
+          origCtx.putImageData(origData, 0, 0);
+          resolve(origCanvas.toDataURL("image/png"));
+        })
+        .catch(() => resolve(aiResultUrl));
+    });
+  }, []);
 
   const handleGeneratePreview = async () => {
     if (!croppedImageSrc || !maskDataUrl) {
@@ -986,51 +994,24 @@ export default function VisualizerApp() {
             )}
           </div>
 
-          <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800">
+          <div className="w-full mx-auto mt-4">
             {resultImage ? (
-              <div className="relative w-full aspect-square select-none touch-none">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={resultImage} alt="After" className="absolute inset-0 w-full h-full object-cover" />
-                <div className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${sliderPos}%` }}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="relative rounded-lg overflow-hidden border border-gray-800 bg-black">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={croppedImageSrc}
-                    alt="Before"
-                    className="absolute top-0 left-0 h-full w-full object-cover max-w-none"
-                    style={{ width: "100%", height: "100%" }}
-                  />
+                  <img src={croppedImageSrc} alt="Before" className="w-full h-auto object-contain" />
+                  <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono shadow-md">BEFORE</span>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={sliderPos}
-                  onChange={(e) => setSliderPos(Number(e.target.value))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
-                />
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10 pointer-events-none shadow-[0_0_12px_rgba(251,191,36,0.8)]"
-                  style={{ left: `${sliderPos}%` }}
-                >
-                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-amber-400 text-gray-950 rounded-full flex items-center justify-center font-bold text-xs shadow-lg">
-                    ↔
-                  </div>
+                <div className="relative rounded-lg overflow-hidden border border-gray-800 bg-black">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={resultImage} alt="After" className="w-full h-auto object-contain" />
+                  <span className="absolute bottom-3 right-3 bg-amber-500 text-black text-xs px-2.5 py-1 rounded font-bold font-mono shadow-md">AFTER ({selectedFeatures.join(" + ").toUpperCase()})</span>
                 </div>
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-2.5 py-1 rounded font-mono">
-                  BEFORE
-                </span>
-                <span className="absolute bottom-3 right-3 bg-black/80 text-amber-300 text-xs px-2.5 py-1 rounded font-mono">
-                  AFTER ({selectedFeatures.join(" + ").toUpperCase()})
-                </span>
               </div>
             ) : (
-              <div className="relative w-full aspect-square">
+              <div className="relative w-full max-w-xl mx-auto rounded-lg overflow-hidden border border-gray-800 bg-black">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={croppedImageSrc}
-                  alt="Interactive Canvas"
-                  className="w-full h-full object-cover pointer-events-none"
-                />
+                <img src={croppedImageSrc} alt="Interactive Canvas" className="w-full h-auto object-contain pointer-events-none" />
                 <canvas
                   ref={overlayCanvasRef}
                   onMouseDown={handleCanvasMouseDown}
