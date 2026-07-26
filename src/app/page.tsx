@@ -407,7 +407,7 @@ export default function VisualizerApp() {
         })
         .join("; ");
 
-      const promptText = `Perfectly natural, photorealistic human portrait. Subtle anatomical refinement: ${procedureDirectives}. Flawless natural skin texture. STRICTLY NO medical instruments, NO surgical tape, NO metal piercings, NO bandages, NO artifacts. Maintain 100% original identity, lighting, and background.`;
+      const promptText = `Perfectly natural photorealistic human portrait showing healed visual anatomy only: ${procedureDirectives}. Clean unbroken natural skin with no marks on the face. Maintain 100% original identity, lighting, clothing, and background.`;
 
       const primary = selectedProcedures[0];
       const avgIntensity = Math.round(
