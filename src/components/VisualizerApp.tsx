@@ -529,7 +529,7 @@ export default function VisualizerApp() {
         if (dist < radius) {
           const normDist = dist / radius;
           const pinchFactor = Math.exp(-normDist * normDist * 3) * amount * verticalFactor;
-          const srcX = centerX + deltaX * (1 + pinchFactor);
+          const srcX = Math.max(0, Math.min(width - 1, centerX + deltaX * (1 + pinchFactor)));
           const x0 = Math.floor(srcX);
           const x1 = Math.min(width - 1, x0 + 1);
           const weight1 = srcX - x0;
