@@ -107,6 +107,16 @@ const PROCEDURES_LIST: { id: ProcedureId; label: string }[] = [
   { id: "lowerLip", label: "Lower Lip" },
 ];
 
+/** Visual-only region labels for AI prompts (no surgical procedure names). */
+const VISUAL_REGION_LABELS: Record<ProcedureId, string> = {
+  chin: "Refined chin",
+  cheeks: "Refined cheeks",
+  rhinoplasty: "Refined nose",
+  eyebrows: "Refined brows",
+  upperLip: "Refined upper lip",
+  lowerLip: "Refined lower lip",
+};
+
 const PRESET_OPTIONS: Record<ProcedureId, string[]> = {
   chin: [
     "Anterior Projection (Mentoplasty)",
@@ -384,12 +394,18 @@ export default function VisualizerApp() {
           : "Face landmarks unavailable — using approximate mask. Uploading to fal...",
       );
 
+      // Visual-only directives — omit surgical procedure names (e.g. Rhinoplasty)
       const procedureDirectives = selectedProcedures
         .map((id) => {
           const c = configs[id];
-          return `${c.label} (${c.preset} at ${c.intensity}% intensity)`;
+          const visualPreset = c.preset
+            .replace(/\s*\([^)]*(plasty|procedure|surgery|filler|mL)[^)]*\)/gi, "")
+            .replace(/\b(rhinoplasty|mentoplasty|procedure|surgery)\b/gi, "")
+            .replace(/\s{2,}/g, " ")
+            .trim();
+          return `${VISUAL_REGION_LABELS[id]}, ${visualPreset}`;
         })
-        .join(", ");
+        .join("; ");
 
       const promptText = `Perfectly natural, photorealistic human portrait. Subtle anatomical refinement: ${procedureDirectives}. Flawless natural skin texture. STRICTLY NO medical instruments, NO surgical tape, NO metal piercings, NO bandages, NO artifacts. Maintain 100% original identity, lighting, and background.`;
 
