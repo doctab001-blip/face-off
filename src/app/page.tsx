@@ -253,6 +253,7 @@ export default function VisualizerApp() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusText, setStatusText] = useState<string>("");
+  const [simulationError, setSimulationError] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [isGridOn, setIsGridOn] = useState(true);
 
@@ -380,6 +381,7 @@ export default function VisualizerApp() {
   const runSimulation = async () => {
     if (!imageSrc || selectedProcedures.length === 0) return;
     setIsProcessing(true);
+    setSimulationError(null);
     setStatusText("Detecting facial landmarks & building anatomical mask...");
 
     try {
@@ -390,8 +392,8 @@ export default function VisualizerApp() {
 
       setStatusText(
         usedLandmarks
-          ? "Uploading assets to fal CDN & executing FLUX General Inpainting..."
-          : "Face landmarks unavailable — using approximate mask. Uploading to fal...",
+          ? "Uploading assets via secure server & executing FLUX General Inpainting..."
+          : "Face landmarks unavailable — using approximate mask. Uploading via server...",
       );
 
       // Visual-only directives — omit surgical procedure names (e.g. Rhinoplasty)
@@ -435,9 +437,12 @@ export default function VisualizerApp() {
         );
       }
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorMessage =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : "Simulation failed with an empty error payload. Check FAL_KEY and try again.";
       console.error("FLUX General Inpainting execution failed:", err);
-      alert(`Simulation Error: ${errorMessage}`);
+      setSimulationError(errorMessage);
     } finally {
       setIsProcessing(false);
       setStatusText("");
@@ -852,6 +857,22 @@ export default function VisualizerApp() {
                 <p className={`mt-3 text-[11px] font-mono text-right animate-pulse ${isDark ? "text-amber-400" : "text-amber-700"}`}>
                   {statusText}
                 </p>
+              )}
+
+              {simulationError && (
+                <div className="mt-4 p-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-200 text-xs font-mono space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-semibold text-rose-300">Simulation Error</p>
+                    <button
+                      type="button"
+                      onClick={() => setSimulationError(null)}
+                      className="px-2 py-1 rounded border border-rose-500/30 text-[10px] uppercase tracking-wide hover:bg-rose-500/20"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <p className="whitespace-pre-wrap break-words text-rose-100/90">{simulationError}</p>
+                </div>
               )}
             </div>
 

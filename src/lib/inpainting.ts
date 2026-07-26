@@ -1,4 +1,5 @@
 import type { ProcedureId, ProcedureType } from "@/lib/types";
+import { formatFalError } from "@/lib/falErrors";
 
 export const INPAINTING_MODEL = "fal-ai/flux-general/inpainting" as const;
 
@@ -41,57 +42,162 @@ function intensityToStrength(intensity: number): number {
   return Number((0.55 + normalized * 0.35).toFixed(2));
 }
 
-async function urlToFile(url: string, filename: string): Promise<File> {
-  const response = await fetch(url);
+async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
+  const response = await fetch(dataUrl);
   if (!response.ok) {
-    throw new Error(`Failed to fetch asset for upload (${response.status}).`);
+    throw new Error(`Failed to read local image data (${response.status}).`);
   }
   const blob = await response.blob();
+  if (blob.size <= 0) {
+    throw new Error("Local image data was empty.");
+  }
   return new File([blob], filename, { type: blob.type || "image/png" });
+}
+
+/** Downscale very large portraits before upload to keep fal payloads reliable. */
+async function maybeDownscaleImageDataUrl(
+  dataUrl: string,
+  maxDim = 1280,
+): Promise<string> {
+  if (typeof document === "undefined") return dataUrl;
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Failed to decode image for resize."));
+    el.src = dataUrl;
+  });
+
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  if (!width || !height) return dataUrl;
+
+  const longest = Math.max(width, height);
+  if (longest <= maxDim) return dataUrl;
+
+  const scale = maxDim / longest;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+async function uploadViaServer(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch("/api/fal/upload", {
+    method: "POST",
+    body: form,
+  });
+
+  let payload: { url?: string; error?: string } = {};
+  try {
+    payload = (await response.json()) as { url?: string; error?: string };
+  } catch {
+    // ignore JSON parse errors
+  }
+
+  if (!response.ok || !payload.url) {
+    throw new Error(
+      payload.error ||
+        `Server upload failed (HTTP ${response.status}). Check FAL_KEY on Vercel.`,
+    );
+  }
+
+  return payload.url;
 }
 
 export async function runProcedureInpainting(
   falClient: typeof import("@fal-ai/client").fal,
   input: InpaintingInput,
 ): Promise<InpaintingOutput> {
-  const [imageFile, maskFile] = await Promise.all([
-    urlToFile(input.imageUrl, "original.png"),
-    urlToFile(input.maskDataUrl, "mask.png"),
-  ]);
+  try {
+    const resizedImageUrl = await maybeDownscaleImageDataUrl(input.imageUrl);
 
-  const [uploadedImageUrl, uploadedMaskUrl] = await Promise.all([
-    falClient.storage.upload(imageFile),
-    falClient.storage.upload(maskFile),
-  ]);
+    // Keep mask aligned to the (possibly resized) image dimensions.
+    const maskSource =
+      resizedImageUrl === input.imageUrl
+        ? input.maskDataUrl
+        : await regenerateMaskForResizedImage(resizedImageUrl, input.maskDataUrl);
 
-  const prompt =
-    input.promptOverride ??
-    PROCEDURE_PROMPTS[input.procedure] ??
-    "Naturally healed facial anatomy with clean unbroken skin, photorealistic portrait, same person, same skin texture, same lighting";
+    const [imageFile, maskFile] = await Promise.all([
+      dataUrlToFile(resizedImageUrl, "original.jpg"),
+      dataUrlToFile(maskSource, "mask.png"),
+    ]);
 
-  const result = await falClient.subscribe(INPAINTING_MODEL, {
-    input: {
-      prompt,
-      negative_prompt: INPAINTING_NEGATIVE_PROMPT,
-      image_url: uploadedImageUrl,
-      mask_url: uploadedMaskUrl,
-      strength: intensityToStrength(input.intensity),
-      num_inference_steps: 28,
-      guidance_scale: 3.5,
-      output_format: "png",
-      enable_safety_checker: true,
-    },
-    logs: true,
-  });
+    const [uploadedImageUrl, uploadedMaskUrl] = await Promise.all([
+      uploadViaServer(imageFile),
+      uploadViaServer(maskFile),
+    ]);
 
-  const resultUrl = result.data?.images?.[0]?.url;
+    const prompt =
+      input.promptOverride ??
+      PROCEDURE_PROMPTS[input.procedure] ??
+      "Naturally healed facial anatomy with clean unbroken skin, photorealistic portrait, same person, same skin texture, same lighting";
 
-  if (!resultUrl) {
-    throw new Error("Inpainting completed but no image was returned.");
+    const result = await falClient.subscribe(INPAINTING_MODEL, {
+      input: {
+        prompt,
+        negative_prompt: INPAINTING_NEGATIVE_PROMPT,
+        image_url: uploadedImageUrl,
+        mask_url: uploadedMaskUrl,
+        strength: intensityToStrength(input.intensity),
+        num_inference_steps: 28,
+        guidance_scale: 3.5,
+        output_format: "png",
+        enable_safety_checker: true,
+      },
+      logs: true,
+    });
+
+    const resultUrl = result.data?.images?.[0]?.url;
+
+    if (!resultUrl) {
+      throw new Error("Inpainting completed but no image was returned.");
+    }
+
+    return {
+      resultUrl,
+      seed: result.data?.seed,
+    };
+  } catch (err: unknown) {
+    throw new Error(formatFalError(err));
   }
+}
 
-  return {
-    resultUrl,
-    seed: result.data?.seed,
-  };
+/**
+ * When the source image is resized, scale the existing mask canvas to match.
+ */
+async function regenerateMaskForResizedImage(
+  resizedImageDataUrl: string,
+  originalMaskDataUrl: string,
+): Promise<string> {
+  const [image, mask] = await Promise.all([
+    loadHtmlImage(resizedImageDataUrl),
+    loadHtmlImage(originalMaskDataUrl),
+  ]);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return originalMaskDataUrl;
+
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(mask, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load image for mask resize."));
+    img.src = src;
+  });
 }
