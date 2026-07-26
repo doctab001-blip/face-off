@@ -392,8 +392,8 @@ export default function VisualizerApp() {
 
       setStatusText(
         usedLandmarks
-          ? "Uploading assets via secure server & executing FLUX General Inpainting..."
-          : "Face landmarks unavailable — using approximate mask. Uploading via server...",
+          ? "Running secure server-side FLUX General Inpainting..."
+          : "Face landmarks unavailable — using approximate mask. Running server-side inpainting...",
       );
 
       // Visual-only directives — omit surgical procedure names (e.g. Rhinoplasty)

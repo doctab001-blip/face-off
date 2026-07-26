@@ -4,9 +4,13 @@ import {
   type FaceLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 
-/** External CDN — do not use local /public MediaPipe assets. */
+/**
+ * External CDN — do not use local /public MediaPipe assets.
+ * Pin to the installed package major/minor so JS bindings and WASM match.
+ * (Unversioned /wasm resolves, but pinning avoids silent version skew.)
+ */
 const WASM_CDN =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm";
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
 
 /** External CDN model asset — do not use local /public MediaPipe assets. */
 const FACE_LANDMARKER_MODEL =

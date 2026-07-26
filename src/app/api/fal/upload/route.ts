@@ -29,15 +29,28 @@ export async function POST(request: Request) {
     }
 
     const form = await request.formData();
-    const file = form.get("file");
+    const entry = form.get("file");
 
-    if (!(file instanceof File)) {
+    // Next/undici may yield Blob or File depending on runtime.
+    if (typeof entry === "string" || entry == null) {
       return Response.json({ error: "Missing file upload." }, { status: 400 });
     }
 
-    if (file.size <= 0) {
+    const blob = entry as Blob;
+    if (blob.size <= 0) {
       return Response.json({ error: "Uploaded file is empty." }, { status: 400 });
     }
+
+    const filename =
+      typeof File !== "undefined" &&
+      entry instanceof File &&
+      entry.name
+        ? entry.name
+        : "upload.bin";
+
+    const file = new File([blob], filename, {
+      type: blob.type || "application/octet-stream",
+    });
 
     const url = await fal.storage.upload(file);
     return Response.json({ url });
