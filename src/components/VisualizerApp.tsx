@@ -685,7 +685,7 @@ export default function VisualizerApp() {
           mask_url: maskDataUrl,
           strength: maxStrength,
           enable_safety_checker: true,
-        },
+        } as never,
       });
       
       if (result.data?.images?.[0]?.url) {
