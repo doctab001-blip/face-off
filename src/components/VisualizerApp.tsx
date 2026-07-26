@@ -125,64 +125,79 @@ export default function VisualizerApp() {
     });
   }, []);
 
-  const updateViewportAndCrop = useCallback(
-    (img: HTMLImageElement, pixelLms: Array<{ x: number; y: number }>, scale: number) => {
-      const origW = img.width;
-      const origH = img.height;
+  const updateViewportAndCrop = useCallback((img: HTMLImageElement, pixelLms: Array<{ x: number; y: number }>, scale: number) => {
+    const origW = img.width;
+    const origH = img.height;
 
-      const glabellaY = pixelLms[9].y;
-      const subnasaleY = pixelLms[2].y;
-      const leftCheekX = pixelLms[234].x;
-      const rightCheekX = pixelLms[454].x;
+    const glabellaY = pixelLms[9].y;
+    const subnasaleY = pixelLms[2].y;
+    const leftCheekX = pixelLms[234].x;
+    const rightCheekX = pixelLms[454].x;
 
-      const midfaceH = Math.abs(subnasaleY - glabellaY);
-      const calcTrichionY = Math.max(0, glabellaY - midfaceH);
-      const calcMentonY = Math.min(origH, subnasaleY + midfaceH * 1.1);
+    const midfaceH = Math.abs(subnasaleY - glabellaY);
+    const calcTrichionY = Math.max(0, glabellaY - midfaceH);
+    const calcMentonY = Math.min(origH, subnasaleY + midfaceH * 1.1);
 
-      const faceWidth = Math.abs(rightCheekX - leftCheekX);
-      const faceHeight = Math.abs(calcMentonY - calcTrichionY);
+    const faceWidth = Math.abs(rightCheekX - leftCheekX);
+    const faceHeight = Math.abs(calcMentonY - calcTrichionY);
 
-      const scaleMultiplier = scale / 100;
-      const padX = faceWidth * 0.35 * scaleMultiplier;
-      const padTop = faceHeight * 0.25 * scaleMultiplier;
-      const padBottom = faceHeight * 0.25 * scaleMultiplier;
+    const scaleMultiplier = scale / 100;
+    const padX = faceWidth * 0.35 * scaleMultiplier;
+    const padTop = faceHeight * 0.25 * scaleMultiplier;
+    const padBottom = faceHeight * 0.25 * scaleMultiplier;
 
-      const cropX = Math.max(0, leftCheekX - padX);
-      const cropY = Math.max(0, calcTrichionY - padTop);
+    // Source coordinates from original image
+    const sourceCropX = Math.max(0, leftCheekX - padX);
+    const sourceCropY = Math.max(0, calcTrichionY - padTop);
+    let sourceCropW = Math.min(origW - sourceCropX, faceWidth + padX * 2);
+    let sourceCropH = Math.min(origH - sourceCropY, faceHeight + padTop + padBottom);
 
-      let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
-      let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
+    // AI PIPELINE LIMIT: Clamp to ~1 Megapixel (1024px max dimension)
+    const MAX_DIMENSION = 1024;
+    let downscaleFactor = 1;
+    if (sourceCropW > MAX_DIMENSION || sourceCropH > MAX_DIMENSION) {
+      downscaleFactor = Math.min(MAX_DIMENSION / sourceCropW, MAX_DIMENSION / sourceCropH);
+    }
 
-      cropW = Math.max(64, Math.floor(cropW / 64) * 64);
-      cropH = Math.max(64, Math.floor(cropH / 64) * 64);
+    // Target Canvas Dimensions (Enforcing PyTorch 64px multiple)
+    let targetCropW = Math.max(64, Math.floor((sourceCropW * downscaleFactor) / 64) * 64);
+    let targetCropH = Math.max(64, Math.floor((sourceCropH * downscaleFactor) / 64) * 64);
+    
+    // Recalculate exact scaling multiplier due to the 64px rounding
+    const exactScaleX = targetCropW / sourceCropW;
+    const exactScaleY = targetCropH / sourceCropH;
 
-      const mapped = pixelLms.map((pt) => ({ x: pt.x - cropX, y: pt.y - cropY }));
+    // Scale facial landmarks to match the resized canvas
+    const mapped = pixelLms.map((pt) => ({ 
+      x: (pt.x - sourceCropX) * exactScaleX, 
+      y: (pt.y - sourceCropY) * exactScaleY 
+    }));
 
-      const initialLines = {
-        trichion: calcTrichionY - cropY,
-        glabella: glabellaY - cropY,
-        subnasale: subnasaleY - cropY,
-        menton: calcMentonY - cropY,
-        leftX: leftCheekX - cropX,
-        rightX: rightCheekX - cropX,
-      };
+    // Scale draggable grid lines to match the resized canvas
+    const initialLines = {
+      trichion: (calcTrichionY - sourceCropY) * exactScaleY,
+      glabella: (glabellaY - sourceCropY) * exactScaleY,
+      subnasale: (subnasaleY - sourceCropY) * exactScaleY,
+      menton: (calcMentonY - sourceCropY) * exactScaleY,
+      leftX: (leftCheekX - sourceCropX) * exactScaleX,
+      rightX: (rightCheekX - sourceCropX) * exactScaleX,
+    };
 
-      setMappedLandmarks(mapped);
-      linePositionsRef.current = initialLines;
+    setMappedLandmarks(mapped);
+    linePositionsRef.current = initialLines;
 
-      const cropCanvas = document.createElement("canvas");
-      cropCanvas.width = cropW;
-      cropCanvas.height = cropH;
-      const cropCtx = cropCanvas.getContext("2d");
-      if (cropCtx) {
-        cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-        setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
-      }
+    const cropCanvas = document.createElement("canvas");
+    cropCanvas.width = targetCropW;
+    cropCanvas.height = targetCropH;
+    const cropCtx = cropCanvas.getContext("2d");
+    if (cropCtx) {
+      // drawImage handles the downscaling automatically: (image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
+      cropCtx.drawImage(img, sourceCropX, sourceCropY, sourceCropW, sourceCropH, 0, 0, targetCropW, targetCropH);
+      setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
+    }
 
-      recalculateMetricsFromLines(initialLines);
-    },
-    [recalculateMetricsFromLines],
-  );
+    recalculateMetricsFromLines(initialLines);
+  }, [recalculateMetricsFromLines]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMessage(null);
