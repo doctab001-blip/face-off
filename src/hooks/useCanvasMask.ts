@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, type RefObject, type MutableRefObject } from "react";
+import { useState, useEffect } from "react";
 import {
   LIPS_INNER_INDICES,
   FEATURE_INDICES,
@@ -12,55 +12,46 @@ import {
   BROW_THICKNESS_MAP,
   DOSAGE_MAP,
   type FeatureType,
-  type LinePositions,
 } from "@/components/constants";
 
-export interface UseProcedureMaskOptions {
+export interface UseCanvasMaskOptions {
   mappedLandmarks: Array<{ x: number; y: number }> | null;
-  croppedImageSrc: string | null;
-  canvasRef: RefObject<HTMLCanvasElement | null>;
-  overlayCanvasRef: RefObject<HTMLCanvasElement | null>;
   selectedFeatures: FeatureType[];
+  croppedImageSrc: string | null;
   browThickness: "thin" | "medium" | "thick";
   lipDosage: string;
   cheekDosage: string;
   chinTechnique: keyof typeof CHIN_TECHNIQUES;
-  showGoldenRatio: boolean;
-  linePositionsRef: MutableRefObject<LinePositions | null>;
-  activeDraggingLineRef: MutableRefObject<string | null>;
-  drawGoldenRatioOverlay: (
-    lines: LinePositions | null,
-    activeKey: string | null,
-    show: boolean,
-  ) => void;
 }
 
-export function useProcedureMask({
+/**
+ * Builds the multi-layer white-on-black inpainting mask from MediaPipe landmarks.
+ * Returns a PNG data URL (or null while unavailable).
+ */
+export function useCanvasMask({
   mappedLandmarks,
-  croppedImageSrc,
-  canvasRef,
-  overlayCanvasRef,
   selectedFeatures,
+  croppedImageSrc,
   browThickness,
   lipDosage,
   cheekDosage,
   chinTechnique,
-  showGoldenRatio,
-  linePositionsRef,
-  activeDraggingLineRef,
-  drawGoldenRatioOverlay,
-}: UseProcedureMaskOptions) {
+}: UseCanvasMaskOptions): string | null {
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
 
-  // ISOLATED MULTI-LAYER MASK COMPOSITING EFFECT
   useEffect(() => {
-    if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
+    if (!mappedLandmarks || !croppedImageSrc) {
+      setMaskDataUrl(null);
+      return;
+    }
 
+    let cancelled = false;
     const img = new Image();
     img.src = croppedImageSrc;
     img.onload = () => {
-      const mainCanvas = canvasRef.current;
-      if (!mainCanvas) return;
+      if (cancelled) return;
+
+      const mainCanvas = document.createElement("canvas");
       mainCanvas.width = img.width;
       mainCanvas.height = img.height;
       const mainCtx = mainCanvas.getContext("2d");
@@ -218,38 +209,26 @@ export function useProcedureMask({
         }
 
         layerCtx.restore();
-
         mainCtx.drawImage(layerCanvas, 0, 0);
       });
 
-      setMaskDataUrl(mainCanvas.toDataURL("image/png"));
-
-      if (overlayCanvasRef.current) {
-        const overlayCanvas = overlayCanvasRef.current;
-        overlayCanvas.width = img.width;
-        overlayCanvas.height = img.height;
-        drawGoldenRatioOverlay(
-          linePositionsRef.current,
-          activeDraggingLineRef.current,
-          showGoldenRatio,
-        );
+      if (!cancelled) {
+        setMaskDataUrl(mainCanvas.toDataURL("image/png"));
       }
+    };
+
+    return () => {
+      cancelled = true;
     };
   }, [
     mappedLandmarks,
     selectedFeatures,
+    croppedImageSrc,
     browThickness,
     lipDosage,
     cheekDosage,
     chinTechnique,
-    showGoldenRatio,
-    croppedImageSrc,
-    drawGoldenRatioOverlay,
-    canvasRef,
-    overlayCanvasRef,
-    linePositionsRef,
-    activeDraggingLineRef,
   ]);
 
-  return { maskDataUrl };
+  return maskDataUrl;
 }

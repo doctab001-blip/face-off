@@ -12,7 +12,7 @@ import {
 } from "@/components/constants";
 import { useMediaPipe } from "@/hooks/useMediaPipe";
 import { useFalAI } from "@/hooks/useFalAI";
-import { useProcedureMask } from "@/hooks/useProcedureMask";
+import { useCanvasMask } from "@/hooks/useCanvasMask";
 import ControlPanel from "@/components/ControlPanel";
 import ComparisonSlider from "@/components/ComparisonSlider";
 import PhiMetricsDisplay from "@/components/PhiMetricsDisplay";
@@ -37,7 +37,6 @@ export default function VisualizerApp() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sliderPos, setSliderPos] = useState<number>(50);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeDraggingLineRef = useRef<string | null>(null);
 
@@ -107,20 +106,14 @@ export default function VisualizerApp() {
     oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
   }, []);
 
-  const { maskDataUrl } = useProcedureMask({
+  const maskDataUrl = useCanvasMask({
     mappedLandmarks,
-    croppedImageSrc,
-    canvasRef,
-    overlayCanvasRef,
     selectedFeatures,
+    croppedImageSrc,
     browThickness,
     lipDosage,
     cheekDosage,
     chinTechnique,
-    showGoldenRatio,
-    linePositionsRef,
-    activeDraggingLineRef,
-    drawGoldenRatioOverlay,
   });
 
   const {
@@ -150,14 +143,31 @@ export default function VisualizerApp() {
     mediaPipeUpload(e);
   }, [mediaPipeUpload, setResultImage]);
 
-  // Redraw grid when toggled or when line state commits (e.g. after drag end)
+  // Size overlay canvas to the cropped portrait and redraw the Φ grid.
   useEffect(() => {
-    drawGoldenRatioOverlay(
-      linePositionsRef.current,
-      activeDraggingLineRef.current,
-      showGoldenRatio,
-    );
-  }, [showGoldenRatio, linePositions, drawGoldenRatioOverlay, linePositionsRef]);
+    if (!croppedImageSrc || !overlayCanvasRef.current) {
+      drawGoldenRatioOverlay(
+        linePositionsRef.current,
+        activeDraggingLineRef.current,
+        showGoldenRatio,
+      );
+      return;
+    }
+
+    const img = new Image();
+    img.src = croppedImageSrc;
+    img.onload = () => {
+      const overlay = overlayCanvasRef.current;
+      if (!overlay) return;
+      overlay.width = img.width;
+      overlay.height = img.height;
+      drawGoldenRatioOverlay(
+        linePositionsRef.current,
+        activeDraggingLineRef.current,
+        showGoldenRatio,
+      );
+    };
+  }, [croppedImageSrc, showGoldenRatio, linePositions, drawGoldenRatioOverlay, linePositionsRef]);
 
   const toggleFeature = (feat: FeatureType) => {
     if (selectedFeatures.includes(feat)) {
@@ -371,7 +381,6 @@ export default function VisualizerApp() {
         </button>
       </div>
 
-      <canvas ref={canvasRef} className="hidden" />
 
       {croppedImageSrc && (
         <ComparisonSlider
