@@ -576,8 +576,62 @@ export default function VisualizerApp() {
     });
   }, []);
 
+  const formatSimulationError = (err: unknown): string => {
+    if (err == null) return "Failed to run composite simulation (unknown null/undefined error).";
+    if (typeof err === "string") return err;
+    if (err instanceof Error) {
+      const anyErr = err as Error & {
+        status?: number | string;
+        statusCode?: number | string;
+        body?: unknown;
+        detail?: unknown;
+        response?: { status?: number | string; data?: unknown };
+      };
+      const parts: string[] = [];
+      if (anyErr.name && anyErr.name !== "Error") parts.push(`[${anyErr.name}]`);
+      if (anyErr.status != null) parts.push(`status=${anyErr.status}`);
+      if (anyErr.statusCode != null) parts.push(`statusCode=${anyErr.statusCode}`);
+      if (anyErr.response?.status != null) parts.push(`response.status=${anyErr.response.status}`);
+      if (anyErr.message) parts.push(anyErr.message);
+      if (anyErr.detail != null) {
+        parts.push(
+          typeof anyErr.detail === "string" ? anyErr.detail : JSON.stringify(anyErr.detail)
+        );
+      }
+      if (anyErr.body != null) {
+        parts.push(typeof anyErr.body === "string" ? anyErr.body : JSON.stringify(anyErr.body));
+      }
+      if (anyErr.response?.data != null) {
+        parts.push(
+          typeof anyErr.response.data === "string"
+            ? anyErr.response.data
+            : JSON.stringify(anyErr.response.data)
+        );
+      }
+      return parts.filter(Boolean).join(" | ") || err.message || "Failed to run composite simulation.";
+    }
+    if (typeof err === "object") {
+      try {
+        return JSON.stringify(err);
+      } catch {
+        return String(err);
+      }
+    }
+    return String(err);
+  };
+
   const handleGeneratePreview = async () => {
-    if (!croppedImageSrc || !maskDataUrl) return;
+    if (!croppedImageSrc || !maskDataUrl) {
+      const msg = !croppedImageSrc
+        ? "Simulation blocked: no cropped portrait loaded."
+        : "Simulation blocked: mask not ready yet. Wait a moment after upload, then try again.";
+      console.error("handleGeneratePreview early exit:", msg, {
+        hasCroppedImage: Boolean(croppedImageSrc),
+        hasMask: Boolean(maskDataUrl),
+      });
+      setErrorMessage(msg);
+      return;
+    }
     setLoading(true);
     setErrorMessage(null);
     try {
@@ -640,11 +694,15 @@ export default function VisualizerApp() {
         const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
         setResultImage(featheredUrl);
       } else {
-        setErrorMessage("AI simulation failed to return an image.");
+        const emptyPayload = JSON.stringify(result?.data ?? result ?? null);
+        const msg = `AI simulation failed to return an image. Response: ${emptyPayload}`;
+        console.error("handleGeneratePreview empty result:", result);
+        setErrorMessage(msg);
       }
     } catch (err: unknown) {
+      const msg = formatSimulationError(err);
       console.error("Composite Simulation Execution Error:", err);
-      const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
+      console.error("Composite Simulation Formatted Error:", msg);
       setErrorMessage(msg);
     } finally {
       setLoading(false);
@@ -723,7 +781,7 @@ export default function VisualizerApp() {
       </div>
 
       {errorMessage && (
-        <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-lg text-red-200 text-sm">
+        <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-lg text-red-200 text-sm font-mono whitespace-pre-wrap break-words">
           {errorMessage}
         </div>
       )}
@@ -879,14 +937,21 @@ export default function VisualizerApp() {
         </div>
       </div>
 
-      <div className="flex justify-end">
-        <button
-          onClick={handleGeneratePreview}
-          disabled={!mappedLandmarks || loading}
-          className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md"
-        >
-          {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
-        </button>
+      <div className="space-y-3">
+        {errorMessage && (
+          <div className="p-3 bg-red-950/70 border border-red-500/60 rounded-lg text-red-100 text-xs font-mono whitespace-pre-wrap break-words">
+            Simulation error: {errorMessage}
+          </div>
+        )}
+        <div className="flex justify-end">
+          <button
+            onClick={handleGeneratePreview}
+            disabled={!mappedLandmarks || loading}
+            className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md"
+          >
+            {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
+          </button>
+        </div>
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
