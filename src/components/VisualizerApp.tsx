@@ -636,56 +636,37 @@ export default function VisualizerApp() {
     setErrorMessage(null);
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
-      let maxStrength = 0.45;
       let targetImage = croppedImageSrc;
-      
+
       if (selectedFeatures.includes("chin")) {
         const chinConfig = CHIN_TECHNIQUES[chinTechnique];
         promptParts.push(chinConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, chinConfig.strength);
       }
       if (selectedFeatures.includes("cheeks")) {
         const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
         const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
         promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
-        maxStrength = Math.max(maxStrength, cheekDosageConfig.strength);
       }
       if (selectedFeatures.includes("brows")) {
         promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.62);
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.50);
       }
       if (selectedFeatures.includes("nose")) {
         const noseConfig = NOSE_TECHNIQUES[noseTechnique];
         promptParts.push(noseConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, noseConfig.strength);
         const warped = await generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
         if (warped) targetImage = warped;
       }
-      
+
       const compositePrompt = promptParts.join(" ");
 
-      // Fixed Bug #6: Scoped negative prompts based on active features
-      const activeNegatives: string[] = ["plastic skin", "distorted geometry", "overfilled face", "asymmetry"];
-      if (selectedFeatures.includes("cheeks")) {
-        activeNegatives.push("lower cheek bulge", "inferior volume sag", "exaggerated nasolabial folds", "heavy marionette lines", "unnatural cheek shadows", "sunken under-eyes");
-      }
-      if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
-        activeNegatives.push("harsh lines around mouth");
-      }
-      const scopedNegativePrompt = activeNegatives.join(", ");
-      
-      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
+      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           prompt: compositePrompt,
-          negative_prompt: scopedNegativePrompt,
           image_url: targetImage,
           mask_url: maskDataUrl,
-          strength: maxStrength,
-          enable_safety_checker: true,
         },
       });
       
