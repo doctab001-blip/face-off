@@ -56,36 +56,26 @@ const NOSE_TECHNIQUES = {
     name: "Straight & Slim Refinement",
     prompt_suffix: "flawless narrow straight nasal bridge, delicate supratip break, refined defined nasal tip cartilage, subtle alar narrowing, seamless skin texture, photorealistic, 8k resolution",
     strength: 0.52,
-    pinchRadiusRatio: 0.32,
-    pinchAmount: 0.28,
   },
   dorsal_hump: {
     name: "Dorsal Hump Reduction",
     prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
     strength: 0.48,
-    pinchRadiusRatio: 0.25,
-    pinchAmount: 0.20,
   },
   tip_plasty: {
     name: "Nasal Tip Refinement",
     prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
     strength: 0.45,
-    pinchRadiusRatio: 0.22,
-    pinchAmount: 0.22,
   },
   alar_reduction: {
     name: "Alar Base Narrowing",
     prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
     strength: 0.42,
-    pinchRadiusRatio: 0.20,
-    pinchAmount: 0.20,
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
     prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
     strength: 0.40,
-    pinchRadiusRatio: 0.18,
-    pinchAmount: 0.12,
   },
 };
 
@@ -515,282 +505,84 @@ export default function VisualizerApp() {
     };
   }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, croppedImageSrc]);
 
-  // Fixed Bug #1: Made generateWarpedImage async with explicit img.decode() promise
-  const generateWarpedImage = async (radiusRatio: number, amount: number): Promise<string | null> => {
-    if (!croppedImageSrc || !mappedLandmarks) return null;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = croppedImageSrc;
-    await img.decode();
+  // Soft-composite AI over original using the same mask sent to fal (pixel-aligned).
+  const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const origImg = new Image();
+      const aiImg = new Image();
+      const maskImg = new Image();
+      let loadedCount = 0;
 
-    const warpCanvas = document.createElement("canvas");
-    const width = img.width;
-    const height = img.height;
-    warpCanvas.width = width;
-    warpCanvas.height = height;
-    const wCtx = warpCanvas.getContext("2d");
-    if (!wCtx) return croppedImageSrc;
-    wCtx.drawImage(img, 0, 0);
-    const srcData = wCtx.getImageData(0, 0, width, height);
-    const dstData = wCtx.createImageData(width, height);
-    const noseTip = mappedLandmarks[1];
-    const noseBridgeTop = mappedLandmarks[168];
-    if (!noseTip || !noseBridgeTop) return croppedImageSrc;
-    const centerX = noseTip.x;
-    const minY = Math.min(noseBridgeTop.y, noseTip.y) - 10;
-    const maxY = Math.max(noseBridgeTop.y, noseTip.y) + 20;
-    const leftAlar = mappedLandmarks[129] || mappedLandmarks[98];
-    const rightAlar = mappedLandmarks[358] || mappedLandmarks[327];
-    const noseWidth = leftAlar && rightAlar ? Math.abs(rightAlar.x - leftAlar.x) : width * 0.25;
-    const radius = noseWidth * (1 + radiusRatio);
-    const srcBytes = srcData.data;
-    const dstBytes = dstData.data;
-    dstBytes.set(srcBytes);
-    for (let y = Math.floor(minY); y <= Math.ceil(maxY); y++) {
-      if (y < 0 || y >= height) continue;
-      const deltaY = y - (minY + (maxY - minY) * 0.5);
-      const verticalFactor = Math.cos((deltaY / (maxY - minY)) * Math.PI * 0.5);
-      for (let x = Math.floor(centerX - radius); x <= Math.ceil(centerX + radius); x++) {
-        if (x < 0 || x >= width) continue;
-        const deltaX = x - centerX;
-        const dist = Math.abs(deltaX);
-        if (dist < radius) {
-          const normDist = dist / radius;
-          const pinchFactor = Math.exp(-normDist * normDist * 3) * amount * verticalFactor;
-          const srcX = Math.max(0, Math.min(width - 1, centerX + deltaX * (1 + pinchFactor)));
-          const x0 = Math.floor(srcX);
-          const x1 = Math.min(width - 1, x0 + 1);
-          const weight1 = srcX - x0;
-          const weight0 = 1 - weight1;
-          const dstIdx = (y * width + x) * 4;
-          const srcIdx0 = (y * width + x0) * 4;
-          const srcIdx1 = (y * width + x1) * 4;
-          for (let c = 0; c < 3; c++) {
-            dstBytes[dstIdx + c] = srcBytes[srcIdx0 + c] * weight0 + srcBytes[srcIdx1 + c] * weight1;
-          }
+      const checkLoaded = () => {
+        loadedCount++;
+        if (loadedCount < 3) return;
+
+        const width = origImg.width;
+        const height = origImg.height;
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(aiResultUrl);
+
+        // Base: original (aligned with mask_url coordinates).
+        ctx.drawImage(origImg, 0, 0, width, height);
+
+        // Build a white-on-transparent soft matte from the fal mask (luminance → alpha only).
+        const matteCanvas = document.createElement("canvas");
+        matteCanvas.width = width;
+        matteCanvas.height = height;
+        const matteCtx = matteCanvas.getContext("2d", { willReadFrequently: true });
+        if (!matteCtx) return resolve(aiResultUrl);
+        matteCtx.drawImage(maskImg, 0, 0, width, height);
+        const matteData = matteCtx.getImageData(0, 0, width, height);
+        const px = matteData.data;
+        for (let i = 0; i < px.length; i += 4) {
+          const alpha = (px[i] + px[i + 1] + px[i + 2]) / 3;
+          px[i] = 255;
+          px[i + 1] = 255;
+          px[i + 2] = 255;
+          px[i + 3] = alpha;
         }
-      }
-    }
-    wCtx.putImageData(dstData, 0, 0);
-    return warpCanvas.toDataURL("image/png");
-  };
+        matteCtx.putImageData(matteData, 0, 0);
 
-  const applyEdgeFeathering = useCallback(
-    (originalSrc: string, aiResultUrl: string, _maskUrl: string): Promise<string> => {
-      return new Promise((resolve) => {
-        if (!mappedLandmarks) {
-          resolve(aiResultUrl);
-          return;
-        }
+        const softMatte = document.createElement("canvas");
+        softMatte.width = width;
+        softMatte.height = height;
+        const softCtx = softMatte.getContext("2d");
+        if (!softCtx) return resolve(aiResultUrl);
+        softCtx.filter = "blur(12px)";
+        softCtx.drawImage(matteCanvas, 0, 0);
 
-        const landmarks = mappedLandmarks;
-        const origImg = new Image();
-        const aiImg = new Image();
-        let loadedCount = 0;
+        // AI clipped by soft matte, then layered over the original.
+        const aiLayer = document.createElement("canvas");
+        aiLayer.width = width;
+        aiLayer.height = height;
+        const aiCtx = aiLayer.getContext("2d");
+        if (!aiCtx) return resolve(aiResultUrl);
+        aiCtx.drawImage(aiImg, 0, 0, width, height);
+        aiCtx.globalCompositeOperation = "destination-in";
+        aiCtx.drawImage(softMatte, 0, 0);
 
-        const drawLandmarkClipShapes = (target: CanvasRenderingContext2D) => {
-          const upperLipCenter = landmarks[13];
-          const lowerLipCenter = landmarks[14];
-          const mouthGap =
-            upperLipCenter && lowerLipCenter
-              ? Math.hypot(lowerLipCenter.x - upperLipCenter.x, lowerLipCenter.y - upperLipCenter.y)
-              : 0;
+        ctx.globalCompositeOperation = "source-over";
+        ctx.drawImage(aiLayer, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
 
-          const fillPoly = (indices: number[], shiftY = 0) => {
-            const startPt = landmarks[indices[0]];
-            if (!startPt) return;
-            target.beginPath();
-            target.moveTo(startPt.x, startPt.y + shiftY);
-            for (let i = 1; i < indices.length; i++) {
-              const pt = landmarks[indices[i]];
-              if (pt) target.lineTo(pt.x, pt.y + shiftY);
-            }
-            target.closePath();
-            target.fillStyle = "#ffffff";
-            target.fill();
-            target.strokeStyle = "#ffffff";
-            target.lineJoin = "round";
-            target.stroke();
-          };
-
-          selectedFeatures.forEach((feat) => {
-            if (feat === "brows") {
-              const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
-              const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
-              const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP.medium;
-              [leftBrow, rightBrow].forEach((browIndices) => {
-                const startPt = landmarks[browIndices[0]];
-                if (!startPt) return;
-                target.beginPath();
-                target.moveTo(startPt.x, startPt.y);
-                for (let i = 1; i < browIndices.length; i++) {
-                  const pt = landmarks[browIndices[i]];
-                  if (pt) target.lineTo(pt.x, pt.y);
-                }
-                target.closePath();
-                target.fillStyle = "#ffffff";
-                target.fill();
-                target.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
-                target.strokeStyle = "#ffffff";
-                target.lineJoin = "miter";
-                target.stroke();
-              });
-            } else if (feat === "chin") {
-              target.lineWidth = 14;
-              fillPoly(CHIN_LANDMARKS);
-            } else if (feat === "cheeks") {
-              const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-              target.lineWidth = dosageConfig.dilationPx;
-              fillPoly(CHEEK_LANDMARKS.left, -8);
-              fillPoly(CHEEK_LANDMARKS.right, -8);
-            } else if (feat === "nose") {
-              target.lineWidth = 12;
-              fillPoly(angleSortIndices(NOSE_LANDMARKS, landmarks));
-            } else {
-              const indices = FEATURE_INDICES[feat];
-              if (!indices?.length) return;
-              const startPt = landmarks[indices[0]];
-              if (!startPt) return;
-              target.beginPath();
-              target.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < indices.length; i++) {
-                const pt = landmarks[indices[i]];
-                if (pt) target.lineTo(pt.x, pt.y);
-              }
-              target.closePath();
-              if (feat.includes("lip") && mouthGap > 6) {
-                const innerStart = landmarks[LIPS_INNER_INDICES[0]];
-                if (innerStart) {
-                  target.moveTo(innerStart.x, innerStart.y);
-                  for (let j = 1; j < LIPS_INNER_INDICES.length; j++) {
-                    const innerPt = landmarks[LIPS_INNER_INDICES[j]];
-                    if (innerPt) target.lineTo(innerPt.x, innerPt.y);
-                  }
-                  target.closePath();
-                }
-              }
-              target.fillStyle = "#ffffff";
-              target.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
-              if (feat.includes("lip")) {
-                const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
-                target.lineWidth = dosageConfig.dilationPx;
-                target.strokeStyle = "#ffffff";
-                target.lineJoin = "round";
-                target.stroke();
-              }
-            }
-          });
-        };
-
-        const buildClipPath = (): Path2D => {
-          const path = new Path2D();
-          const appendPoly = (indices: number[], shiftY = 0) => {
-            const startPt = landmarks[indices[0]];
-            if (!startPt) return;
-            path.moveTo(startPt.x, startPt.y + shiftY);
-            for (let i = 1; i < indices.length; i++) {
-              const pt = landmarks[indices[i]];
-              if (pt) path.lineTo(pt.x, pt.y + shiftY);
-            }
-            path.closePath();
-          };
-
-          selectedFeatures.forEach((feat) => {
-            if (feat === "brows") {
-              appendPoly([70, 63, 105, 66, 107, 55, 65, 52, 53, 46]);
-              appendPoly([300, 293, 334, 296, 336, 285, 295, 282, 283, 276]);
-            } else if (feat === "chin") {
-              appendPoly(CHIN_LANDMARKS);
-            } else if (feat === "cheeks") {
-              appendPoly(CHEEK_LANDMARKS.left, -8);
-              appendPoly(CHEEK_LANDMARKS.right, -8);
-            } else if (feat === "nose") {
-              appendPoly(angleSortIndices(NOSE_LANDMARKS, landmarks));
-            } else {
-              const indices = FEATURE_INDICES[feat];
-              if (indices?.length) appendPoly(indices);
-            }
-          });
-
-          return path;
-        };
-
-        const checkLoaded = () => {
-          loadedCount++;
-          if (loadedCount < 2) return;
-
-          const width = origImg.width;
-          const height = origImg.height;
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return resolve(aiResultUrl);
-
-          // 1) Original portrait as the clinical base — never touched by mask RGB.
-          ctx.drawImage(origImg, 0, 0, width, height);
-
-          // 2) White-only clip matte via landmark Path2D + ctx.clip() (transparent outside; never black RGB).
-          const clipPath = buildClipPath();
-          const shapeCanvas = document.createElement("canvas");
-          shapeCanvas.width = width;
-          shapeCanvas.height = height;
-          const shapeCtx = shapeCanvas.getContext("2d");
-          if (!shapeCtx) return resolve(aiResultUrl);
-          shapeCtx.save();
-          shapeCtx.clip(clipPath);
-          shapeCtx.fillStyle = "#ffffff";
-          shapeCtx.fillRect(0, 0, width, height);
-          shapeCtx.restore();
-          // Extra stroke coverage for brows/lips (still white-only on transparent).
-          drawLandmarkClipShapes(shapeCtx);
-
-          const softPass1 = document.createElement("canvas");
-          softPass1.width = width;
-          softPass1.height = height;
-          const soft1Ctx = softPass1.getContext("2d");
-          if (!soft1Ctx) return resolve(aiResultUrl);
-          soft1Ctx.filter = "blur(24px)";
-          soft1Ctx.drawImage(shapeCanvas, 0, 0);
-
-          const softClipMatte = document.createElement("canvas");
-          softClipMatte.width = width;
-          softClipMatte.height = height;
-          const softCtx = softClipMatte.getContext("2d");
-          if (!softCtx) return resolve(aiResultUrl);
-          softCtx.filter = "blur(16px)";
-          softCtx.drawImage(softPass1, 0, 0);
-
-          // 3) AI inside soft clip matte (alpha only), then source-over the original base.
-          const aiLayer = document.createElement("canvas");
-          aiLayer.width = width;
-          aiLayer.height = height;
-          const aiCtx = aiLayer.getContext("2d");
-          if (!aiCtx) return resolve(aiResultUrl);
-          aiCtx.drawImage(aiImg, 0, 0, width, height);
-          aiCtx.globalCompositeOperation = "destination-in";
-          aiCtx.drawImage(softClipMatte, 0, 0);
-
-          ctx.save();
-          ctx.globalCompositeOperation = "source-over";
-          ctx.drawImage(aiLayer, 0, 0);
-          ctx.restore();
-
-          resolve(canvas.toDataURL("image/png"));
-        };
-
-        origImg.crossOrigin = "anonymous";
-        aiImg.crossOrigin = "anonymous";
-        origImg.onload = checkLoaded;
-        aiImg.onload = checkLoaded;
-        origImg.onerror = () => resolve(aiResultUrl);
-        aiImg.onerror = () => resolve(aiResultUrl);
-        origImg.src = originalSrc;
-        aiImg.src = aiResultUrl;
-      });
-    },
-    [mappedLandmarks, selectedFeatures, browThickness, cheekDosage, lipDosage]
-  );
+      origImg.crossOrigin = "anonymous";
+      aiImg.crossOrigin = "anonymous";
+      maskImg.crossOrigin = "anonymous";
+      origImg.onload = checkLoaded;
+      aiImg.onload = checkLoaded;
+      maskImg.onload = checkLoaded;
+      origImg.onerror = () => resolve(aiResultUrl);
+      aiImg.onerror = () => resolve(aiResultUrl);
+      maskImg.onerror = () => resolve(aiResultUrl);
+      origImg.src = originalSrc;
+      aiImg.src = aiResultUrl;
+      maskImg.src = maskUrl;
+    });
+  }, []);
 
   const logSimulationErrorDetails = (label: string, err: unknown) => {
     if (err == null) {
@@ -846,7 +638,6 @@ export default function VisualizerApp() {
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
       let maxStrength = 0.45;
-      let targetImage = croppedImageSrc;
 
       if (selectedFeatures.includes("chin")) {
         const chinConfig = CHIN_TECHNIQUES[chinTechnique];
@@ -871,8 +662,6 @@ export default function VisualizerApp() {
         const noseConfig = NOSE_TECHNIQUES[noseTechnique];
         promptParts.push(noseConfig.prompt_suffix);
         maxStrength = Math.max(maxStrength, noseConfig.strength);
-        const warped = await generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
-        if (warped) targetImage = warped;
       }
 
       const compositePrompt = promptParts.join(" ");
@@ -893,11 +682,12 @@ export default function VisualizerApp() {
       }
       const scopedNegativePrompt = activeNegatives.join(", ");
 
+      // Use the unwarped crop so image_url and mask_url share identical pixel coordinates.
       const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           prompt: compositePrompt,
           negative_prompt: scopedNegativePrompt,
-          image_url: targetImage,
+          image_url: croppedImageSrc,
           mask_url: maskDataUrl,
           strength: maxStrength,
           enable_safety_checker: true,
