@@ -156,16 +156,6 @@ export default function DashboardApp() {
     }, 1800);
   };
 
-  const handleSimulationComplete = () => {
-    if (!activeFacilityId) return;
-    setFacilities((prev) =>
-      prev.map((f) =>
-        f.id === activeFacilityId
-          ? { ...f, simulationsUsed: f.simulationsUsed + 1 }
-          : f,
-      ),
-    );
-  };
 
   const tabClass = (tab: ActiveTab | "pricing_group") => {
     const active =
@@ -320,7 +310,7 @@ export default function DashboardApp() {
               </div>
             </div>
 
-            <VisualizerApp embedded onSimulationComplete={handleSimulationComplete} />
+            <VisualizerApp />
           </div>
         )}
 
