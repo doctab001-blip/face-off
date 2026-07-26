@@ -148,6 +148,15 @@ export const LIP_TECHNIQUES = {
 
 export type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip";
 
+export type LinePositions = {
+  trichion: number;
+  glabella: number;
+  subnasale: number;
+  menton: number;
+  leftX: number;
+  rightX: number;
+};
+
 export const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
   "0.25ml": { strength: 0.35, dilationPx: 4 },
   "0.50ml": { strength: 0.45, dilationPx: 8 },

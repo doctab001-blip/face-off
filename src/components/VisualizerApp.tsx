@@ -1,39 +1,20 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
-import { fal } from "@fal-ai/client";
 import {
-  LIPS_INNER_INDICES,
-  FEATURE_INDICES,
-  NOSE_LANDMARKS,
-  CHEEK_LANDMARKS,
-  CHIN_LANDMARKS,
   NOSE_TECHNIQUES,
   CHEEK_TECHNIQUES,
-  CHEEK_DOSAGE_MAP,
   CHIN_TECHNIQUES,
   BROW_TECHNIQUES,
   LIP_TECHNIQUES,
-  DOSAGE_MAP,
-  BROW_THICKNESS_MAP,
   type FeatureType,
+  type LinePositions,
 } from "@/components/constants";
-
-fal.config({ proxyUrl: "/api/fal/proxy" });
-
-type LinePositions = {
-  trichion: number;
-  glabella: number;
-  subnasale: number;
-  menton: number;
-  leftX: number;
-  rightX: number;
-};
+import { useMediaPipe } from "@/hooks/useMediaPipe";
+import { useFalAI } from "@/hooks/useFalAI";
+import { useProcedureMask } from "@/hooks/useProcedureMask";
 
 export default function VisualizerApp() {
-  const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
-
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks"]);
 
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
@@ -50,77 +31,30 @@ export default function VisualizerApp() {
 
   const [showGoldenRatio, setShowGoldenRatio] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(100);
-
-  const [linePositions, setLinePositions] = useState<LinePositions | null>(null);
-
-  const [fullFacePhi, setFullFacePhi] = useState<{
-    facePhiRatio: string;
-    verticalThirdsRatio: string;
-    overallScore: string;
-    clinicalAnalysis: string;
-  } | null>(null);
-
-  const [landmarker, setLandmarker] = useState<FaceLandmarker | null>(null);
-  const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
-  const [mappedLandmarks, setMappedLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
-
-  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
-  const [resultImage, setResultImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sliderPos, setSliderPos] = useState<number>(50);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const loadedImageRef = useRef<HTMLImageElement | null>(null);
-  const linePositionsRef = useRef<LinePositions | null>(null);
   const activeDraggingLineRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    let faceLandmarker: FaceLandmarker | null = null;
-
-    async function initMediaPipe() {
-      try {
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-        );
-        const created = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
-            delegate: "CPU",
-          },
-          runningMode: "IMAGE",
-          numFaces: 1,
-        });
-        if (cancelled) {
-          created.close();
-          return;
-        }
-        faceLandmarker = created;
-        setLandmarker(created);
-      } catch {
-        if (!cancelled) {
-          setErrorMessage("Failed to load facial recognition engine.");
-        }
-      }
-    }
-    initMediaPipe();
-    return () => {
-      cancelled = true;
-      faceLandmarker?.close();
-    };
+  const onError = useCallback((message: string | null) => {
+    setErrorMessage(message);
   }, []);
 
-  const toggleFeature = (feat: FeatureType) => {
-    if (selectedFeatures.includes(feat)) {
-      if (selectedFeatures.length > 1) {
-        setSelectedFeatures(selectedFeatures.filter((f) => f !== feat));
-      }
-    } else {
-      setSelectedFeatures([...selectedFeatures, feat]);
-    }
-  };
+  const {
+    mappedLandmarks,
+    croppedImageSrc,
+    handleImageUpload: mediaPipeUpload,
+    linePositions,
+    setLinePositions,
+    linePositionsRef,
+    fullFacePhi,
+    recalculateMetricsFromLines,
+  } = useMediaPipe({
+    zoomScale,
+    onError,
+  });
 
   const drawGoldenRatioOverlay = useCallback((
     lines: LinePositions | null,
@@ -170,329 +104,48 @@ export default function VisualizerApp() {
     oCtx.fillText("Rule of Thirds (Φ = 1.618) Grid", leftX + 10, trichion + 15);
   }, []);
 
-  const recalculateMetricsFromLines = useCallback((lines: LinePositions | null) => {
-    if (!lines) return;
+  const { maskDataUrl } = useProcedureMask({
+    mappedLandmarks,
+    croppedImageSrc,
+    canvasRef,
+    overlayCanvasRef,
+    selectedFeatures,
+    browThickness,
+    lipDosage,
+    cheekDosage,
+    chinTechnique,
+    showGoldenRatio,
+    linePositionsRef,
+    activeDraggingLineRef,
+    drawGoldenRatioOverlay,
+  });
 
-    const { trichion, glabella, subnasale, menton, leftX, rightX } = lines;
+  const {
+    resultImage,
+    setResultImage,
+    loading,
+    handleGeneratePreview,
+  } = useFalAI({
+    croppedImageSrc,
+    maskDataUrl,
+    mappedLandmarks,
+    selectedFeatures,
+    chinTechnique,
+    cheekTechnique,
+    cheekDosage,
+    browTechnique,
+    browThickness,
+    browDensity,
+    lipTechnique,
+    lipDosage,
+    noseTechnique,
+    onError,
+  });
 
-    const faceHeight = menton - trichion;
-    const faceWidth = Math.abs(rightX - leftX);
-    const facePhi = faceWidth > 0 ? (faceHeight / faceWidth).toFixed(3) : "1.618";
-
-    const upperThird = Math.abs(glabella - trichion);
-    const middleThird = Math.abs(subnasale - glabella);
-    const lowerThird = Math.abs(menton - subnasale);
-    const avgThird = (upperThird + middleThird + lowerThird) / 3;
-    const thirdsRatioStr = `${(upperThird / avgThird).toFixed(2)} : ${(middleThird / avgThird).toFixed(2)} : ${(lowerThird / avgThird).toFixed(2)}`;
-
-    const phiDiff = Math.abs(parseFloat(facePhi) - 1.618);
-    const overallScore = Math.max(70, Math.min(99, 100 - phiDiff * 30)).toFixed(1);
-
-    let analysis = "Near-Ideal Divine Proportion (Φ 1.618)";
-    if (parseFloat(facePhi) < 1.5) analysis = "Wider Midface Geometry / Brachycephalic";
-    if (parseFloat(facePhi) > 1.75) analysis = "Elongated Facial Height / Dolichocephalic";
-
-    setFullFacePhi({
-      facePhiRatio: facePhi,
-      verticalThirdsRatio: thirdsRatioStr,
-      overallScore: `${overallScore}%`,
-      clinicalAnalysis: analysis,
-    });
-  }, []);
-
-  const updateViewportAndCrop = useCallback((img: HTMLImageElement, pixelLms: Array<{ x: number; y: number }>, scale: number) => {
-    const origW = img.width;
-    const origH = img.height;
-
-    const glabellaY = pixelLms[9].y;
-    const subnasaleY = pixelLms[2].y;
-    const leftCheekX = pixelLms[234].x;
-    const rightCheekX = pixelLms[454].x;
-
-    const midfaceH = Math.abs(subnasaleY - glabellaY);
-
-    const calcTrichionY = Math.max(0, glabellaY - midfaceH);
-    const calcMentonY = Math.min(origH, subnasaleY + midfaceH * 1.1);
-
-    const faceWidth = Math.abs(rightCheekX - leftCheekX);
-    const faceHeight = Math.abs(calcMentonY - calcTrichionY);
-
-    const scaleMultiplier = scale / 100;
-    const padX = faceWidth * 0.35 * scaleMultiplier;
-    const padTop = faceHeight * 0.25 * scaleMultiplier;
-    const padBottom = faceHeight * 0.25 * scaleMultiplier;
-
-    const cropX = Math.max(0, leftCheekX - padX);
-    const cropY = Math.max(0, calcTrichionY - padTop);
-    let cropW = Math.min(origW - cropX, faceWidth + padX * 2);
-    let cropH = Math.min(origH - cropY, faceHeight + padTop + padBottom);
-
-    // Enforce 64px multiple to prevent PyTorch 422 shape mismatch errors
-    cropW = Math.max(64, Math.floor(cropW / 64) * 64);
-    cropH = Math.max(64, Math.floor(cropH / 64) * 64);
-
-    const mapped = pixelLms.map((pt) => ({
-      x: pt.x - cropX,
-      y: pt.y - cropY,
-    }));
-
-    const initialLines = {
-      trichion: calcTrichionY - cropY,
-      glabella: glabellaY - cropY,
-      subnasale: subnasaleY - cropY,
-      menton: calcMentonY - cropY,
-      leftX: leftCheekX - cropX,
-      rightX: rightCheekX - cropX,
-    };
-
-    setMappedLandmarks(mapped);
-    linePositionsRef.current = initialLines;
-    setLinePositions(initialLines);
-
-    const cropCanvas = document.createElement("canvas");
-    cropCanvas.width = cropW;
-    cropCanvas.height = cropH;
-    const cropCtx = cropCanvas.getContext("2d");
-    if (cropCtx) {
-      cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-      setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
-    }
-    recalculateMetricsFromLines(initialLines);
-  }, [recalculateMetricsFromLines]);
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setErrorMessage(null);
+  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setResultImage(null);
-    setCroppedImageSrc(null);
-    setFullFacePhi(null);
-    setMappedLandmarks(null);
-    linePositionsRef.current = null;
-    setLinePositions(null);
-
-    const file = e.target.files?.[0];
-    if (!file || !landmarker) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const src = event.target?.result as string;
-
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = src;
-      img.onload = () => {
-        loadedImageRef.current = img;
-        try {
-          const results = landmarker.detect(img);
-          if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
-            const rawLms = results.faceLandmarks[0];
-            const pixelLms = rawLms.map((pt: { x: number; y: number }) => ({
-              x: pt.x * img.width,
-              y: pt.y * img.height,
-            }));
-
-            setRawPixelLandmarks(pixelLms);
-            updateViewportAndCrop(img, pixelLms, zoomScale);
-          } else {
-            setErrorMessage("No face detected. Upload a front-facing portrait.");
-          }
-        } catch {
-          setErrorMessage("Failed to analyze facial geometry.");
-        }
-      };
-    };
-    reader.readAsDataURL(file);
-  };
-
-  useEffect(() => {
-    if (loadedImageRef.current && rawPixelLandmarks) {
-      updateViewportAndCrop(loadedImageRef.current, rawPixelLandmarks, zoomScale);
-    }
-  }, [zoomScale, rawPixelLandmarks, updateViewportAndCrop]);
-
-  // ISOLATED MULTI-LAYER MASK COMPOSITING EFFECT
-  useEffect(() => {
-    if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
-
-    const img = new Image();
-    img.src = croppedImageSrc;
-    img.onload = () => {
-      const mainCanvas = canvasRef.current;
-      if (!mainCanvas) return;
-      mainCanvas.width = img.width;
-      mainCanvas.height = img.height;
-      const mainCtx = mainCanvas.getContext("2d");
-      if (!mainCtx) return;
-
-      mainCtx.fillStyle = "black";
-      mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
-
-      const upperLipCenter = mappedLandmarks[13];
-      const lowerLipCenter = mappedLandmarks[14];
-      const mouthGap = upperLipCenter && lowerLipCenter
-        ? Math.hypot(lowerLipCenter.x - upperLipCenter.x, lowerLipCenter.y - upperLipCenter.y)
-        : 0;
-
-      const layerCanvas = document.createElement("canvas");
-      layerCanvas.width = img.width;
-      layerCanvas.height = img.height;
-      const layerCtx = layerCanvas.getContext("2d");
-
-      selectedFeatures.forEach((feat) => {
-        if (!layerCtx) return;
-
-        layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
-        layerCtx.save();
-
-        if (feat === "brows") {
-          layerCtx.filter = "none";
-          const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
-          const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
-          const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP["medium"];
-
-          [leftBrow, rightBrow].forEach((browIndices) => {
-            layerCtx.beginPath();
-            const startPt = mappedLandmarks[browIndices[0]];
-            if (!startPt) return;
-            layerCtx.moveTo(startPt.x, startPt.y);
-            for (let i = 1; i < browIndices.length; i++) {
-              const pt = mappedLandmarks[browIndices[i]];
-              if (pt) layerCtx.lineTo(pt.x, pt.y);
-            }
-            layerCtx.closePath();
-            layerCtx.fillStyle = "white";
-            layerCtx.fill();
-
-            layerCtx.lineWidth = thicknessConfig.stroke + thicknessConfig.padding;
-            layerCtx.strokeStyle = "white";
-            layerCtx.lineJoin = "miter";
-            layerCtx.stroke();
-          });
-        } else if (feat === "chin") {
-          const config = CHIN_TECHNIQUES[chinTechnique];
-          layerCtx.filter = `blur(${config.blurPx}px)`;
-
-          layerCtx.beginPath();
-          const startPt = mappedLandmarks[CHIN_LANDMARKS[0]];
-          if (startPt) {
-            layerCtx.moveTo(startPt.x, startPt.y);
-            for (let i = 1; i < CHIN_LANDMARKS.length; i++) {
-              const pt = mappedLandmarks[CHIN_LANDMARKS[i]];
-              if (pt) layerCtx.lineTo(pt.x, pt.y);
-            }
-            layerCtx.closePath();
-            layerCtx.fillStyle = "white";
-            layerCtx.fill();
-
-            layerCtx.lineWidth = 14;
-            layerCtx.strokeStyle = "white";
-            layerCtx.lineJoin = "round";
-            layerCtx.stroke();
-          }
-        } else if (feat === "cheeks") {
-          const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          layerCtx.filter = "blur(8px)";
-          const shiftY = -8;
-
-          [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
-            layerCtx.beginPath();
-            const startPt = mappedLandmarks[cheekIndices[0]];
-            if (!startPt) return;
-            layerCtx.moveTo(startPt.x, startPt.y + shiftY);
-            for (let i = 1; i < cheekIndices.length; i++) {
-              const pt = mappedLandmarks[cheekIndices[i]];
-              if (pt) layerCtx.lineTo(pt.x, pt.y + shiftY);
-            }
-            layerCtx.closePath();
-            layerCtx.fillStyle = "white";
-            layerCtx.fill();
-
-            layerCtx.lineWidth = dosageConfig.dilationPx;
-            layerCtx.strokeStyle = "white";
-            layerCtx.lineJoin = "round";
-            layerCtx.stroke();
-          });
-        } else if (feat === "nose") {
-          layerCtx.filter = "blur(8px)";
-
-          if (NOSE_LANDMARKS && NOSE_LANDMARKS.length > 0) {
-            layerCtx.beginPath();
-            const startPt = mappedLandmarks[NOSE_LANDMARKS[0]];
-            if (startPt) {
-              layerCtx.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < NOSE_LANDMARKS.length; i++) {
-                const pt = mappedLandmarks[NOSE_LANDMARKS[i]];
-                if (pt) layerCtx.lineTo(pt.x, pt.y);
-              }
-              layerCtx.closePath();
-              layerCtx.fillStyle = "white";
-              layerCtx.fill();
-
-              layerCtx.lineWidth = 10;
-              layerCtx.strokeStyle = "white";
-              layerCtx.lineJoin = "round";
-              layerCtx.stroke();
-            }
-          }
-        } else {
-          layerCtx.filter = "blur(8px)";
-          const indices = FEATURE_INDICES[feat];
-
-          if (indices && indices.length > 0) {
-            layerCtx.beginPath();
-            const startPt = mappedLandmarks[indices[0]];
-            if (startPt) {
-              layerCtx.moveTo(startPt.x, startPt.y);
-              for (let i = 1; i < indices.length; i++) {
-                const pt = mappedLandmarks[indices[i]];
-                if (pt) layerCtx.lineTo(pt.x, pt.y);
-              }
-              layerCtx.closePath();
-
-              if (feat.includes("lip") && mouthGap > 6) {
-                const innerStart = mappedLandmarks[LIPS_INNER_INDICES[0]];
-                if (innerStart) {
-                  layerCtx.moveTo(innerStart.x, innerStart.y);
-                  for (let j = 1; j < LIPS_INNER_INDICES.length; j++) {
-                    const innerPt = mappedLandmarks[LIPS_INNER_INDICES[j]];
-                    if (innerPt) layerCtx.lineTo(innerPt.x, innerPt.y);
-                  }
-                  layerCtx.closePath();
-                }
-              }
-
-              layerCtx.fillStyle = "white";
-              layerCtx.fill(feat.includes("lip") && mouthGap > 6 ? "evenodd" : "nonzero");
-
-              if (feat.includes("lip")) {
-                const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
-                layerCtx.lineWidth = dosageConfig.dilationPx;
-                layerCtx.strokeStyle = "white";
-                layerCtx.lineJoin = "round";
-                layerCtx.stroke();
-              }
-            }
-          }
-        }
-
-        layerCtx.restore();
-
-        mainCtx.drawImage(layerCanvas, 0, 0);
-      });
-
-      setMaskDataUrl(mainCanvas.toDataURL("image/png"));
-
-      if (overlayCanvasRef.current) {
-        const overlayCanvas = overlayCanvasRef.current;
-        overlayCanvas.width = img.width;
-        overlayCanvas.height = img.height;
-        drawGoldenRatioOverlay(
-          linePositionsRef.current,
-          activeDraggingLineRef.current,
-          showGoldenRatio,
-        );
-      }
-    };
-  }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, showGoldenRatio, croppedImageSrc, drawGoldenRatioOverlay]);
+    mediaPipeUpload(e);
+  }, [mediaPipeUpload, setResultImage]);
 
   // Redraw grid when toggled or when line state commits (e.g. after drag end)
   useEffect(() => {
@@ -501,141 +154,17 @@ export default function VisualizerApp() {
       activeDraggingLineRef.current,
       showGoldenRatio,
     );
-  }, [showGoldenRatio, linePositions, drawGoldenRatioOverlay]);
+  }, [showGoldenRatio, linePositions, drawGoldenRatioOverlay, linePositionsRef]);
 
-  const generateWarpedImage = useCallback((radiusRatio: number, amount: number): string | null => {
-    if (!croppedImageSrc || !mappedLandmarks) return null;
-
-    const img = new Image();
-    img.src = croppedImageSrc;
-
-    const warpCanvas = document.createElement("canvas");
-    const width = img.width;
-    const height = img.height;
-    warpCanvas.width = width;
-    warpCanvas.height = height;
-
-    const wCtx = warpCanvas.getContext("2d");
-    if (!wCtx) return croppedImageSrc;
-    wCtx.drawImage(img, 0, 0);
-
-    const srcData = wCtx.getImageData(0, 0, width, height);
-    const dstData = wCtx.createImageData(width, height);
-
-    const noseTip = mappedLandmarks[1];
-    const noseBridgeTop = mappedLandmarks[168];
-    if (!noseTip || !noseBridgeTop) return croppedImageSrc;
-
-    const centerX = noseTip.x;
-    const minY = Math.min(noseBridgeTop.y, noseTip.y) - 10;
-    const maxY = Math.max(noseBridgeTop.y, noseTip.y) + 20;
-
-    const leftAlar = mappedLandmarks[129] || mappedLandmarks[98];
-    const rightAlar = mappedLandmarks[358] || mappedLandmarks[327];
-    const noseWidth = leftAlar && rightAlar ? Math.abs(rightAlar.x - leftAlar.x) : width * 0.25;
-
-    const radius = noseWidth * (1 + radiusRatio);
-
-    const srcBytes = srcData.data;
-    const dstBytes = dstData.data;
-    dstBytes.set(srcBytes);
-
-    for (let y = Math.floor(minY); y <= Math.ceil(maxY); y++) {
-      if (y < 0 || y >= height) continue;
-
-      const deltaY = y - (minY + (maxY - minY) * 0.5);
-      const verticalFactor = Math.cos((deltaY / (maxY - minY)) * Math.PI * 0.5);
-
-      for (let x = Math.floor(centerX - radius); x <= Math.ceil(centerX + radius); x++) {
-        if (x < 0 || x >= width) continue;
-
-        const deltaX = x - centerX;
-        const dist = Math.abs(deltaX);
-
-        if (dist < radius) {
-          const normDist = dist / radius;
-          const pinchFactor = Math.exp(-normDist * normDist * 3) * amount * verticalFactor;
-          const srcX = centerX + deltaX * (1 + pinchFactor);
-
-          const x0 = Math.floor(srcX);
-          const x1 = Math.min(width - 1, x0 + 1);
-          const weight1 = srcX - x0;
-          const weight0 = 1 - weight1;
-
-          const dstIdx = (y * width + x) * 4;
-          const srcIdx0 = (y * width + x0) * 4;
-          const srcIdx1 = (y * width + x1) * 4;
-
-          for (let c = 0; c < 3; c++) {
-            dstBytes[dstIdx + c] = srcBytes[srcIdx0 + c] * weight0 + srcBytes[srcIdx1 + c] * weight1;
-          }
-        }
+  const toggleFeature = (feat: FeatureType) => {
+    if (selectedFeatures.includes(feat)) {
+      if (selectedFeatures.length > 1) {
+        setSelectedFeatures(selectedFeatures.filter((f) => f !== feat));
       }
+    } else {
+      setSelectedFeatures([...selectedFeatures, feat]);
     }
-
-    wCtx.putImageData(dstData, 0, 0);
-    return warpCanvas.toDataURL("image/png");
-  }, [croppedImageSrc, mappedLandmarks]);
-
-  // METHOD B: ADAPTIVE ALPHA EDGE-FEATHERING POST-PROCESSOR
-  const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const origImg = new Image();
-      const aiImg = new Image();
-      const maskImg = new Image();
-
-      let loadedCount = 0;
-      const checkLoaded = () => {
-        loadedCount++;
-        if (loadedCount === 3) {
-          const canvas = document.createElement("canvas");
-          const width = origImg.width;
-          const height = origImg.height;
-          canvas.width = width;
-          canvas.height = height;
-
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return resolve(aiResultUrl);
-
-          ctx.drawImage(aiImg, 0, 0, width, height);
-
-          const alphaCanvas = document.createElement("canvas");
-          alphaCanvas.width = width;
-          alphaCanvas.height = height;
-          const aCtx = alphaCanvas.getContext("2d");
-          if (!aCtx) return resolve(aiResultUrl);
-
-          aCtx.filter = "blur(16px)";
-          aCtx.drawImage(maskImg, 0, 0, width, height);
-
-          ctx.save();
-          ctx.globalCompositeOperation = "destination-out";
-          ctx.drawImage(alphaCanvas, 0, 0);
-          ctx.globalCompositeOperation = "destination-over";
-          ctx.drawImage(origImg, 0, 0, width, height);
-          ctx.restore();
-
-          resolve(canvas.toDataURL("image/png"));
-        }
-      };
-
-      origImg.crossOrigin = "anonymous";
-      aiImg.crossOrigin = "anonymous";
-      maskImg.crossOrigin = "anonymous";
-
-      origImg.onload = checkLoaded;
-      aiImg.onload = checkLoaded;
-      maskImg.onload = checkLoaded;
-
-      origImg.onerror = () => resolve(aiResultUrl);
-      aiImg.onerror = () => resolve(aiResultUrl);
-      maskImg.onerror = () => resolve(aiResultUrl);
-
-      origImg.src = originalSrc;
-      aiImg.src = aiResultUrl;
-      maskImg.src = maskUrl;
-    });
-  }, []);
+  };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!showGoldenRatio || !linePositionsRef.current || !overlayCanvasRef.current) return;
@@ -681,77 +210,6 @@ export default function VisualizerApp() {
     }
     activeDraggingLineRef.current = null;
     drawGoldenRatioOverlay(linePositionsRef.current, null, showGoldenRatio);
-  };
-
-  const handleGeneratePreview = async () => {
-    if (!croppedImageSrc || !maskDataUrl) return;
-
-    setLoading(true);
-    setErrorMessage(null);
-
-    try {
-      const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
-      let maxStrength = 0.45;
-      let targetImage = croppedImageSrc;
-
-      if (selectedFeatures.includes("chin")) {
-        const chinConfig = CHIN_TECHNIQUES[chinTechnique];
-        promptParts.push(chinConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, chinConfig.strength);
-      }
-
-      if (selectedFeatures.includes("cheeks")) {
-        const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
-        const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-        promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
-        maxStrength = Math.max(maxStrength, cheekDosageConfig.strength);
-      }
-
-      if (selectedFeatures.includes("brows")) {
-        promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.62);
-      }
-
-      if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
-        promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.50);
-      }
-
-      if (selectedFeatures.includes("nose")) {
-        const noseConfig = NOSE_TECHNIQUES[noseTechnique];
-        promptParts.push(noseConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, noseConfig.strength);
-
-        const warped = generateWarpedImage(noseConfig.pinchRadiusRatio, noseConfig.pinchAmount);
-        if (warped) targetImage = warped;
-      }
-
-      const compositePrompt = promptParts.join(" ");
-
-      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
-        input: {
-          prompt: compositePrompt,
-          negative_prompt: "lower cheek bulge, inferior volume sag, exaggerated nasolabial folds, heavy marionette lines, unnatural cheek shadows, sunken under-eyes, plastic skin, distorted geometry, overfilled face, asymmetry, harsh lines around mouth",
-          image_url: targetImage,
-          mask_url: maskDataUrl,
-          strength: maxStrength,
-          enable_safety_checker: true,
-        },
-      });
-
-      if (result.data?.images?.[0]?.url) {
-        const rawAiUrl = result.data.images[0].url;
-        const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
-        setResultImage(featheredUrl);
-      } else {
-        setErrorMessage("AI simulation failed to return an image.");
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to run composite simulation.";
-      setErrorMessage(msg);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleExportPDF = () => {
