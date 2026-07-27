@@ -21,6 +21,11 @@ const NOSE_LANDMARKS = [
 
 // Mask expansion and padding are anatomy-relative: 22% of the inter-alar (nostril base) width.
 const NOSE_EXPANSION_RATIO = 0.22;
+// Widen the nasal mask 15% horizontally about X_mid so the dorsum and both sidewalls are
+// covered uniformly, rather than pinching to a narrow vertical band down the bridge.
+const NOSE_HORIZONTAL_EXPANSION = 1.15;
+// Gaussian radius for the nasal region; large enough that the seam dissolves into skin.
+const NOSE_BLUR_PX = 20;
 const NOSE_ALAR_LEFT = 129;
 const NOSE_ALAR_RIGHT = 358;
 
@@ -140,6 +145,12 @@ function buildMidlineSymmetricPolygon(pts: Point[], midlineX: number): Point[] {
   const correction = midlineX - boxCenterX;
 
   return symmetric.map((p) => ({ x: p.x + correction, y: p.y }));
+}
+
+// Scale horizontal offsets about X_mid. Applied to an already-symmetric polygon this widens
+// both sides by the same amount, so the midline anchor and bilateral symmetry are preserved.
+function expandHorizontallyAboutMidline(pts: Point[], midlineX: number, factor: number): Point[] {
+  return pts.map((pt) => ({ x: midlineX + (pt.x - midlineX) * factor, y: pt.y }));
 }
 
 const CHEEK_LANDMARKS = {
@@ -658,9 +669,16 @@ export default function VisualizerApp() {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
           const rawNosePts = getLandmarkPoints(noseIndices, mappedLandmarks);
           const midlineX = computeFacialMidlineX(mappedLandmarks);
-          // Mirror every landmark about X_mid so the mask cannot inherit lateral mesh drift.
+          // Mirror every landmark about X_mid so the mask cannot inherit lateral mesh drift,
+          // then widen horizontally about the same axis to span dorsum + both sidewalls.
           const nosePts =
-            midlineX !== null ? buildMidlineSymmetricPolygon(rawNosePts, midlineX) : rawNosePts;
+            midlineX !== null
+              ? expandHorizontallyAboutMidline(
+                  buildMidlineSymmetricPolygon(rawNosePts, midlineX),
+                  midlineX,
+                  NOSE_HORIZONTAL_EXPANSION
+                )
+              : rawNosePts;
           const noseMetrics = nosePts.length >= 3 ? getLandmarkMetrics(nosePts) : null;
           const leftAlar = mappedLandmarks[NOSE_ALAR_LEFT];
           const rightAlar = mappedLandmarks[NOSE_ALAR_RIGHT];
@@ -671,7 +689,7 @@ export default function VisualizerApp() {
           // Dilation and Gaussian padding are both 22% of measured inter-alar width, so the
           // dorsal hump and tip are fully covered without spilling into adjacent zones.
           const nosePaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
-          layerCtx.filter = `blur(${nosePaddingPx.toFixed(2)}px)`;
+          layerCtx.filter = `blur(${Math.max(NOSE_BLUR_PX, nosePaddingPx).toFixed(2)}px)`;
           fillPolygonPoints(layerCtx, nosePts, nosePaddingPx);
         } else if (feat === "jawline") {
           // Same alar-width anatomy scale as the nose region above, so buccal/jaw
