@@ -257,29 +257,48 @@ const BUCCAL_LANDMARKS = {
 // edge path).
 const JAWLINE_LANDMARKS = [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454];
 
-// Lower-face masks sit adjacent to the mouth, where high denoise makes FLUX invent skin
-// grain and freckles. Hard ceiling — the request is to never exceed 0.50.
-const LOWER_FACE_MAX_STRENGTH = 0.48;
+// --- CLINICAL FACIAL SIMULATION & MASK CALIBRATION ENGINE ---
+// Per-procedure calibration. blurMultiplier is a fraction of measured bizygomatic
+// (facial) width, so gradients stay proportional across crop sizes. maxStrength caps
+// denoise per region: lower-face masks abut cheek skin, and higher values make FLUX
+// invent grain and freckles.
+const FACIAL_CALIBRATION_CONFIG = {
+  buccal: {
+    maxStrength: 0.50,
+    blurMultiplier: 0.055, // 5.5% of total bizygomatic width for natural sub-malar gradient
+    prompt:
+      "sub-malar buccal fat pad volume reduction, natural lower cheek contouring, smooth facial taper, photorealistic, identical skin texture, exact skin tone, zero texture modification, same lighting",
+  },
+  jawline: {
+    maxStrength: 0.52,
+    blurMultiplier: 0.070, // 7.0% for soft mandibular angle blending
+    prompt:
+      "refined mandibular angle contour, subtle V-line lower face slimming, smooth jawline definition, photorealistic, identical skin texture, exact skin tone, zero texturing artifacts, same lighting",
+  },
+} as const;
 
-// Texture lock appended to every lower-face prompt.
+type CalibrationKey = keyof typeof FACIAL_CALIBRATION_CONFIG;
+
+// Texture lock appended to chin prompts (the jawline prompts carry their own).
 const LOWER_FACE_PRESERVATION =
   "subtle contouring only, exactly same skin texture, same skin tone, same lighting, no freckles, no texture change, zero perioral distortion, photorealistic";
 
-const JAWLINE_TECHNIQUES = {
+// Each preset selects which calibrated regions participate.
+const JAWLINE_TECHNIQUES: Record<
+  string,
+  { name: string; calibrations: readonly CalibrationKey[] }
+> = {
   buccal_fat_removal: {
     name: "Buccal Fat Pad Removal",
-    prompt_suffix: `reduced buccal fat pad volume, slimmer contoured lower cheek hollow beneath the cheekbone, refined natural facial taper, same person, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.45,
+    calibrations: ["buccal"],
   },
   jawline_slim: {
     name: "Jawline Slimming (V-Line)",
-    prompt_suffix: `slender tapered jawline, reduced mandibular width, sharp refined jaw contour, elegant V-line lower face, same person, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.48,
+    calibrations: ["jawline"],
   },
   combined_contour: {
     name: "Combined Lower Face Contour",
-    prompt_suffix: `reduced buccal fat pad volume with a slender tapered V-line jawline, refined natural facial taper, same person, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.48,
+    calibrations: ["buccal", "jawline"],
   },
 };
 
@@ -740,8 +759,10 @@ export default function VisualizerApp() {
           const facialWidth =
             leftTemple && rightTemple ? Math.abs(rightTemple.x - leftTemple.x) : img.width * 0.45;
 
-          const drawBuccal = jawlineTechnique === "buccal_fat_removal" || jawlineTechnique === "combined_contour";
-          const drawMandibularStroke = jawlineTechnique === "jawline_slim" || jawlineTechnique === "combined_contour";
+          const activeCalibrations =
+            JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+          const drawBuccal = activeCalibrations.includes("buccal");
+          const drawMandibularStroke = activeCalibrations.includes("jawline");
 
           // Perioral guard: everything below is clipped strictly inferior to the
           // tragus-commissure line, so the lips and mouth corners are never inpainted.
@@ -756,7 +777,8 @@ export default function VisualizerApp() {
           );
 
           if (drawBuccal) {
-            const buccalPaddingPx = facialWidth * 0.065;
+            // Sub-malar triangle, calibrated to 5.5% of bizygomatic width.
+            const buccalPaddingPx = facialWidth * FACIAL_CALIBRATION_CONFIG.buccal.blurMultiplier;
             layerCtx.filter = `blur(${buccalPaddingPx.toFixed(2)}px)`;
             const midlineX = computeFacialMidlineX(mappedLandmarks);
             (
@@ -775,7 +797,7 @@ export default function VisualizerApp() {
                 layerCanvas.width,
                 layerCanvas.height
               );
-              fillLandmarkPoly(layerCtx, buccalIndices, buccalPaddingPx * 0.5);
+              fillLandmarkPoly(layerCtx, buccalIndices, buccalPaddingPx * 0.4);
               layerCtx.restore();
             });
           }
@@ -791,7 +813,8 @@ export default function VisualizerApp() {
               .filter((pt): pt is { x: number; y: number } => Boolean(pt));
             if (jawPts.length > 1) {
               const strokeWidthPx = facialWidth * 0.15;
-              const strokeBlurPx = facialWidth * 0.08;
+              // Soft mandibular angle blending, calibrated to 7% of bizygomatic width.
+              const strokeBlurPx = facialWidth * FACIAL_CALIBRATION_CONFIG.jawline.blurMultiplier;
               layerCtx.filter = `blur(${strokeBlurPx.toFixed(2)}px)`;
               layerCtx.beginPath();
               jawPts.forEach((pt, i) => {
@@ -987,12 +1010,16 @@ export default function VisualizerApp() {
         maxStrength = Math.max(maxStrength, noseConfig.strength);
       }
       if (selectedFeatures.includes("jawline")) {
-        const jawlineConfig = JAWLINE_TECHNIQUES[jawlineTechnique];
-        promptParts.push(jawlineConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, jawlineConfig.strength);
-        // Lower-face masks abut the mouth and cheek skin: cap denoise here regardless of
-        // what other selected procedures ask for, or FLUX repaints grain and freckles.
-        maxStrength = Math.min(maxStrength, LOWER_FACE_MAX_STRENGTH);
+        const calibrations =
+          JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+        calibrations.forEach((key) => promptParts.push(FACIAL_CALIBRATION_CONFIG[key].prompt));
+        // strength is a single global parameter, so the most texture-sensitive selected
+        // region governs it. The calibrated ceiling is both the target and the hard cap:
+        // assigning it here raises a quieter selection up to the clinical value and pulls a
+        // co-selected nose/cheek preset back down, instead of letting either repaint grain.
+        maxStrength = Math.max(
+          ...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength)
+        );
       }
 
       const compositePrompt = promptParts.join(" ");
