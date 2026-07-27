@@ -1,27 +1,23 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: #f8fafc;
-  --color-foreground: #0f172a;
-  --color-muted: #475569;
-  --color-accent: #1d4ed8;
-  --color-accent-soft: #1d4ed814;
-  --color-accent-alt: #0d9488;
-  --color-surface: #ffffff;
-  --color-surface-elevated: #f1f5f9;
-  --color-border: #e2e8f0;
+  --color-background: #0a0a0f;
+  --color-foreground: #f4f0eb;
+  --color-muted: #8b8798;
+  --color-accent: #c9a87c;
+  --color-accent-soft: #c9a87c33;
+  --color-surface: #14141c;
+  --color-surface-elevated: #1c1c28;
+  --color-border: #2a2a38;
   --font-display: var(--font-display);
   --font-sans: var(--font-sans);
 }
 
 body {
-  color: var(--color-foreground);
   background:
-    radial-gradient(ellipse 70% 45% at 12% -10%, #1d4ed814, transparent),
-    radial-gradient(ellipse 60% 40% at 100% 0%, #0d948814, transparent),
-    radial-gradient(ellipse 80% 50% at 50% 110%, #6366f10f, transparent),
+    radial-gradient(ellipse 80% 50% at 50% -20%, #c9a87c18, transparent),
+    radial-gradient(ellipse 60% 40% at 100% 100%, #6b5b9520, transparent),
     var(--color-background);
-  background-attachment: fixed;
 }
 
 .font-display {
@@ -30,36 +26,6 @@ body {
 
 .font-sans {
   font-family: var(--font-sans), system-ui, sans-serif;
-}
-
-/* Vibrant clinical action gradient used by primary buttons. */
-.btn-clinical {
-  background-image: linear-gradient(135deg, #1d4ed8 0%, #2563eb 45%, #0d9488 100%);
-  color: #ffffff;
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.08),
-    0 8px 20px -8px rgba(29, 78, 216, 0.45);
-}
-
-.btn-clinical:hover:not(:disabled) {
-  background-image: linear-gradient(135deg, #1e40af 0%, #1d4ed8 45%, #0f766e 100%);
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.1),
-    0 12px 26px -8px rgba(29, 78, 216, 0.55);
-}
-
-.btn-clinical:disabled {
-  background-image: none;
-  background-color: #e2e8f0;
-  color: #94a3b8;
-  box-shadow: none;
-}
-
-/* Subtle elevation for clinical cards on the light canvas. */
-.card-clinical {
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    0 12px 32px -20px rgba(15, 23, 42, 0.18);
 }
 
 @keyframes fade-up {
