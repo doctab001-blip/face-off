@@ -19,17 +19,10 @@ const NOSE_LANDMARKS = [
   164,
 ];
 
-// Mask expansion is anatomy-relative: 28% of the inter-alar (nostril base) width.
-const NOSE_EXPANSION_RATIO = 0.28;
+// Mask expansion and padding are anatomy-relative: 22% of the inter-alar (nostril base) width.
+const NOSE_EXPANSION_RATIO = 0.22;
 const NOSE_ALAR_LEFT = 129;
 const NOSE_ALAR_RIGHT = 358;
-
-// Bizygomatic reference width (px) that the tabulated cheek dilation values were authored against.
-const CHEEK_REFERENCE_BIZYGOMATIC_PX = 360;
-// Zygomatic projection reach as a fraction of measured bizygomatic width.
-const CHEEK_PROJECTION_RATIO = 0.035;
-const FACE_LATERAL_LEFT = 234;
-const FACE_LATERAL_RIGHT = 454;
 
 type Point = { x: number; y: number };
 
@@ -144,10 +137,14 @@ const CHEEK_TECHNIQUES = {
   },
 };
 
-const CHEEK_DOSAGE_MAP: Record<string, { strength: number; dilationPx: number; promptLabel: string }> = {
-  "0.50ml": { strength: 0.32, dilationPx: 8, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
-  "1.00ml": { strength: 0.40, dilationPx: 14, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
-  "1.50ml": { strength: 0.48, dilationPx: 20, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
+// Volumetric cheek parameter matrix: dosage → inference strength, Gaussian blur radius, dilation.
+const CHEEK_DOSAGE_MAP: Record<
+  string,
+  { strength: number; blurRadius: number; dilationPx: number; promptLabel: string }
+> = {
+  "0.50ml": { strength: 0.35, blurRadius: 12, dilationPx: 8, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
+  "1.00ml": { strength: 0.45, blurRadius: 16, dilationPx: 12, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
+  "1.50ml": { strength: 0.55, blurRadius: 20, dilationPx: 16, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
 };
 
 const CHIN_TECHNIQUES = {
@@ -444,7 +441,8 @@ export default function VisualizerApp() {
         ctx.fill();
       };
 
-      // Radial intensity falloff — analytically smooth, so there is no vector edge to smudge.
+      // Linear alpha ramp: 1.0 at the core landmark locus → 0.0 at the outer boundary radius.
+      // Canvas interpolates radial stops linearly, so this is an exact linear falloff with no seam.
       const fillRadialVolume = (
         ctx: CanvasRenderingContext2D,
         indices: number[],
@@ -457,8 +455,6 @@ export default function VisualizerApp() {
         const outerRadius = maxRadius + expansionPx;
         if (outerRadius <= 0) return;
 
-        // Plateau covers the anatomical region; the remainder integrates to zero opacity.
-        const plateauStop = Math.min(0.72, maxRadius / outerRadius);
         const gradient = ctx.createRadialGradient(
           centroid.x,
           centroid.y,
@@ -467,22 +463,17 @@ export default function VisualizerApp() {
           centroid.y,
           outerRadius
         );
-        gradient.addColorStop(0, "rgba(255,255,255,1)");
-        gradient.addColorStop(plateauStop, "rgba(255,255,255,1)");
-        gradient.addColorStop(Math.min(0.94, plateauStop + 0.2), "rgba(255,255,255,0.45)");
-        gradient.addColorStop(1, "rgba(255,255,255,0)");
+        // alpha(r) = 1 - r / outerRadius
+        for (let step = 0; step <= 8; step++) {
+          const t = step / 8;
+          gradient.addColorStop(t, `rgba(255,255,255,${(1 - t).toFixed(4)})`);
+        }
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
         ctx.arc(centroid.x, centroid.y, outerRadius, 0, Math.PI * 2);
         ctx.fill();
       };
-
-      const bizygomaticWidth = (() => {
-        const left = mappedLandmarks[FACE_LATERAL_LEFT];
-        const right = mappedLandmarks[FACE_LATERAL_RIGHT];
-        return left && right ? Math.abs(right.x - left.x) : img.width * 0.6;
-      })();
 
       const layerCanvas = document.createElement("canvas");
       layerCanvas.width = img.width;
@@ -494,31 +485,27 @@ export default function VisualizerApp() {
         layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
         layerCtx.save();
 
-        // Heavy soft blur so filled volumes taper into transparency (no hard clip edges).
-        layerCtx.filter = "blur(18px)";
-
         if (feat === "brows") {
           const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
           const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
           const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP.medium;
-          const inflate = Math.max(4, thicknessConfig.padding * 0.45);
+          const dilationPx = Math.max(4, thicknessConfig.padding * 0.45);
+          // Gaussian falloff applied exclusively to the filled volumetric path.
+          layerCtx.filter = `blur(${(dilationPx * 1.5).toFixed(2)}px)`;
           [leftBrow, rightBrow].forEach((browIndices) => {
-            fillLandmarkPoly(layerCtx, browIndices, inflate);
+            fillLandmarkPoly(layerCtx, browIndices, dilationPx);
           });
         } else if (feat === "chin") {
+          const chinConfig = CHIN_TECHNIQUES[chinTechnique];
+          layerCtx.filter = `blur(${chinConfig.blurPx}px)`;
           fillLandmarkPoly(layerCtx, CHIN_LANDMARKS, 8);
         } else if (feat === "cheeks") {
+          // Explicit dosage matrix drives blur radius and dilation; no coordinate translation.
           const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          // Scale tabulated dilation to the measured bizygomatic width, then add the
-          // zygomatic projection reach. Rendered as a radial gradient (no strokes, no shiftY).
-          const anatomicScale = bizygomaticWidth / CHEEK_REFERENCE_BIZYGOMATIC_PX;
-          const dilationPx = dosageConfig.dilationPx * anatomicScale;
-          const projectionOffsetPx = bizygomaticWidth * CHEEK_PROJECTION_RATIO;
-          const expansionPx = dilationPx + projectionOffsetPx;
-          layerCtx.filter = `blur(${(dilationPx * 1.6).toFixed(2)}px)`;
+          layerCtx.filter = `blur(${dosageConfig.blurRadius}px)`;
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
             const cheekIndices = angleSortIndices(cheekIndicesRaw, mappedLandmarks);
-            fillRadialVolume(layerCtx, cheekIndices, expansionPx);
+            fillRadialVolume(layerCtx, cheekIndices, dosageConfig.dilationPx);
           });
         } else if (feat === "nose") {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
@@ -526,20 +513,23 @@ export default function VisualizerApp() {
           const noseMetrics = nosePts.length >= 3 ? getLandmarkMetrics(nosePts) : null;
           const leftAlar = mappedLandmarks[NOSE_ALAR_LEFT];
           const rightAlar = mappedLandmarks[NOSE_ALAR_RIGHT];
-          const interAlarWidth =
+          const alarWidth =
             leftAlar && rightAlar
               ? Math.abs(rightAlar.x - leftAlar.x)
               : (noseMetrics?.width ?? img.width * 0.18);
-          const expansionPx = interAlarWidth * NOSE_EXPANSION_RATIO;
-          layerCtx.filter = `blur(${Math.max(10, (noseMetrics?.height ?? 0) * 0.12).toFixed(2)}px)`;
-          fillLandmarkPoly(layerCtx, noseIndices, expansionPx);
+          // Dilation and Gaussian padding are both 22% of measured inter-alar width, so the
+          // dorsal hump and tip are fully covered without spilling into adjacent zones.
+          const nosePaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
+          layerCtx.filter = `blur(${nosePaddingPx.toFixed(2)}px)`;
+          fillLandmarkPoly(layerCtx, noseIndices, nosePaddingPx);
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
             const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
-            const inflate = feat.includes("lip") ? Math.max(4, dosageConfig.dilationPx * 0.5) : 6;
+            const dilationPx = feat.includes("lip") ? Math.max(4, dosageConfig.dilationPx * 0.5) : 6;
+            layerCtx.filter = `blur(${(dilationPx * 1.5).toFixed(2)}px)`;
             // Solid outer lip/feature volume only — no inner oral cutouts or stroke outlines.
-            fillLandmarkPoly(layerCtx, indices, inflate);
+            fillLandmarkPoly(layerCtx, indices, dilationPx);
           }
         }
 
