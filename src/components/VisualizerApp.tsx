@@ -1112,8 +1112,10 @@ export default function VisualizerApp() {
       }
       const scopedNegativePrompt = activeNegatives.join(", ");
 
-      // Use the unwarped crop so image_url and mask_url share identical pixel coordinates.
-      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
+      // flux-general/inpainting supports strength, negative_prompt, and
+      // enable_safety_checker; flux-pro/v1/fill does not. Uses the unwarped
+      // crop so image_url and mask_url share identical pixel coordinates.
+      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
         input: {
           prompt: compositePrompt,
           negative_prompt: scopedNegativePrompt,
@@ -1121,7 +1123,7 @@ export default function VisualizerApp() {
           mask_url: maskDataUrl,
           strength: maxStrength,
           enable_safety_checker: true,
-        } as never,
+        },
       });
       
       if (result.data?.images?.[0]?.url) {
