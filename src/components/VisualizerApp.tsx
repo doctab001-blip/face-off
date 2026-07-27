@@ -193,7 +193,7 @@ const JAWLINE_TECHNIQUES = {
   combined_contour: {
     name: "Combined Lower Face Contour",
     prompt_suffix: "reduced buccal fat pad volume with a slender tapered V-line jawline, refined natural facial taper, photorealistic, same person, same skin texture, same lighting",
-    strength: 0.68,
+    strength: 0.70,
   },
 };
 
@@ -586,53 +586,6 @@ export default function VisualizerApp() {
         ctx.fill();
       };
 
-      // Fills a thin strip along an open landmark path (e.g. the jaw edge),
-      // rather than the whole interior a closed fill would cover. Offsets
-      // each point outward along its local path normal (finite-difference
-      // tangent, sign resolved away from an interior reference point) to
-      // build a ribbon polygon. Verified against canonical_face_model.obj
-      // to stay a simple (non-self-crossing) polygon at this offset scale.
-      const fillRibbonAlongPath = (
-        ctx: CanvasRenderingContext2D,
-        indices: number[],
-        stripWidthPx: number,
-        interiorRef: { x: number; y: number },
-      ) => {
-        const pts = indices
-          .map((idx) => mappedLandmarks[idx])
-          .filter((pt): pt is { x: number; y: number } => Boolean(pt));
-        if (pts.length < 3) return;
-
-        const n = pts.length;
-        const outer = pts.map((p, i) => {
-          const prev = pts[(i - 1 + n) % n];
-          const next = pts[(i + 1) % n];
-          const tx = next.x - prev.x;
-          const ty = next.y - prev.y;
-          let nx = -ty;
-          let ny = tx;
-          const len = Math.hypot(nx, ny) || 1;
-          nx /= len;
-          ny /= len;
-          const toP = { x: p.x - interiorRef.x, y: p.y - interiorRef.y };
-          if (nx * toP.x + ny * toP.y < 0) {
-            nx = -nx;
-            ny = -ny;
-          }
-          return { x: p.x + nx * stripWidthPx, y: p.y + ny * stripWidthPx };
-        });
-
-        const ribbon = [...pts, ...outer.slice().reverse()];
-        ctx.beginPath();
-        ribbon.forEach((pt, i) => {
-          if (i === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.closePath();
-        ctx.fillStyle = "white";
-        ctx.fill();
-      };
-
       const layerCanvas = document.createElement("canvas");
       layerCanvas.width = img.width;
       layerCanvas.height = img.height;
@@ -700,20 +653,44 @@ export default function VisualizerApp() {
           const rightTemple = mappedLandmarks[454];
           const facialWidth =
             leftTemple && rightTemple ? Math.abs(rightTemple.x - leftTemple.x) : img.width * 0.45;
-          // Blur radius (edge softness) and mask coverage width are different
-          // concerns — a thin ribbon can only soften the existing jaw edge,
-          // it can't give FLUX room to actually redraw a narrower silhouette.
-          // Widen coverage well beyond the blur radius so there's real space
-          // for the model to repaint background/shadow past the current edge.
-          const jawBlurPx = facialWidth * 0.065;
-          const jawCoveragePx = facialWidth * 0.14;
-          layerCtx.filter = `blur(${jawBlurPx.toFixed(2)}px)`;
-          [BUCCAL_LANDMARKS.left, BUCCAL_LANDMARKS.right].forEach((buccalIndicesRaw) => {
-            const buccalIndices = angleSortIndices(buccalIndicesRaw, mappedLandmarks);
-            fillLandmarkPoly(layerCtx, buccalIndices, jawCoveragePx * 0.5);
-          });
-          const jawInteriorRef = mappedLandmarks[2] || { x: 0, y: 0 };
-          fillRibbonAlongPath(layerCtx, JAWLINE_LANDMARKS, jawCoveragePx, jawInteriorRef);
+
+          const drawBuccal = jawlineTechnique === "buccal_fat_removal" || jawlineTechnique === "combined_contour";
+          const drawMandibularStroke = jawlineTechnique === "jawline_slim" || jawlineTechnique === "combined_contour";
+
+          if (drawBuccal) {
+            const buccalPaddingPx = facialWidth * 0.065;
+            layerCtx.filter = `blur(${buccalPaddingPx.toFixed(2)}px)`;
+            [BUCCAL_LANDMARKS.left, BUCCAL_LANDMARKS.right].forEach((buccalIndicesRaw) => {
+              const buccalIndices = angleSortIndices(buccalIndicesRaw, mappedLandmarks);
+              fillLandmarkPoly(layerCtx, buccalIndices, buccalPaddingPx * 0.5);
+            });
+          }
+
+          if (drawMandibularStroke) {
+            // Thick, unclosed stroke along the true mandibular contour
+            // (234 -> 152 -> 454) rather than a filled internal polygon —
+            // it bleeds outward into the background and inward onto the
+            // lower cheek, giving FLUX room to redraw an actually narrower
+            // silhouette instead of just softening the existing edge.
+            const jawPts = JAWLINE_LANDMARKS
+              .map((idx) => mappedLandmarks[idx])
+              .filter((pt): pt is { x: number; y: number } => Boolean(pt));
+            if (jawPts.length > 1) {
+              const strokeWidthPx = facialWidth * 0.15;
+              const strokeBlurPx = facialWidth * 0.08;
+              layerCtx.filter = `blur(${strokeBlurPx.toFixed(2)}px)`;
+              layerCtx.beginPath();
+              jawPts.forEach((pt, i) => {
+                if (i === 0) layerCtx.moveTo(pt.x, pt.y);
+                else layerCtx.lineTo(pt.x, pt.y);
+              });
+              layerCtx.lineWidth = strokeWidthPx;
+              layerCtx.strokeStyle = "white";
+              layerCtx.lineJoin = "round";
+              layerCtx.lineCap = "round";
+              layerCtx.stroke();
+            }
+          }
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
