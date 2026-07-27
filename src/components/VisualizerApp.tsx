@@ -12,7 +12,14 @@ const FEATURE_INDICES: Record<string, number[]> = {
   brows: [70, 63, 105, 66, 107, 55, 65, 52, 53, 46, 300, 293, 334, 296, 336, 285, 295, 282, 283, 276],
 };
 
-const NOSE_LANDMARKS = [1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429];
+// Broadened perimeter (adds upper sidewalls, alar wings, and columella base) so FLUX
+// gets a wider canvas for bridge + tip reshaping instead of a tiny isolated patch.
+const NOSE_LANDMARKS = [
+  1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429, 122, 351, 131, 360,
+  164,
+];
+
+const NOSE_MASK_INFLATE_PX = 20;
 
 // NOSE_LANDMARKS and CHEEK_LANDMARKS aren't listed in perimeter order (they
 // zigzag across the region), so connecting the raw indices with lineTo
@@ -369,13 +376,12 @@ export default function VisualizerApp() {
       const fillLandmarkPoly = (
         ctx: CanvasRenderingContext2D,
         indices: number[],
-        inflatePx = 0,
-        shiftY = 0
+        inflatePx = 0
       ) => {
         const pts = indices
           .map((idx) => mappedLandmarks[idx])
           .filter((pt): pt is { x: number; y: number } => Boolean(pt))
-          .map((pt) => ({ x: pt.x, y: pt.y + shiftY }));
+          .map((pt) => ({ x: pt.x, y: pt.y }));
         if (pts.length < 3) return;
 
         let cx = 0;
@@ -431,14 +437,15 @@ export default function VisualizerApp() {
           fillLandmarkPoly(layerCtx, CHIN_LANDMARKS, 8);
         } else if (feat === "cheeks") {
           const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          const inflate = Math.max(6, dosageConfig.dilationPx * 0.55);
+          // Uniform inflate with no vertical offset — offsetting left a dark smudge border.
+          const inflate = Math.max(10, dosageConfig.dilationPx * 0.55);
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
             const cheekIndices = angleSortIndices(cheekIndicesRaw, mappedLandmarks);
-            fillLandmarkPoly(layerCtx, cheekIndices, inflate, -8);
+            fillLandmarkPoly(layerCtx, cheekIndices, inflate);
           });
         } else if (feat === "nose") {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
-          fillLandmarkPoly(layerCtx, noseIndices, 10);
+          fillLandmarkPoly(layerCtx, noseIndices, NOSE_MASK_INFLATE_PX);
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
@@ -612,6 +619,9 @@ export default function VisualizerApp() {
       if (selectedFeatures.includes("nose")) {
         const noseConfig = NOSE_TECHNIQUES[noseTechnique];
         promptParts.push(noseConfig.prompt_suffix);
+        promptParts.push(
+          "reshape the full nasal unit including bridge, dorsum, sidewalls, and tip with smooth continuous contours"
+        );
         maxStrength = Math.max(maxStrength, noseConfig.strength);
       }
 
