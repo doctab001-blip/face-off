@@ -153,6 +153,10 @@ function expandHorizontallyAboutMidline(pts: Point[], midlineX: number, factor: 
   return pts.map((pt) => ({ x: midlineX + (pt.x - midlineX) * factor, y: pt.y }));
 }
 
+// Outer temple landmarks — bizygomatic (facial) width reference.
+const FACE_LATERAL_LEFT = 234;
+const FACE_LATERAL_RIGHT = 454;
+
 // Perioral exclusion anchors: tragus (ear attachment) and mouth commissure per side.
 const TRAGUS_LEFT = 234;
 const TRAGUS_RIGHT = 454;
@@ -256,6 +260,21 @@ const BUCCAL_LANDMARKS = {
 // through angleSortIndices (which is for closed hollow fills, not an open
 // edge path).
 const JAWLINE_LANDMARKS = [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454];
+
+// --- CLINICAL LIPS & CHEEKS MASK & STRENGTH REFINEMENT ---
+// Calibrated denoise ceilings. Above these, FLUX flattens skin texture and smears
+// volumetric edges, so the dosage tables may raise strength only up to these values.
+const PROCEDURE_STRENGTH_MAP: Record<string, number> = {
+  cheeks: 0.42, // Subdued volumetric projection to eliminate smudges
+  upper_lip: 0.38, // Gentle vermilion border eversion without texture washout
+  lower_lip: 0.38,
+};
+
+// Cheek gradient as a fraction of measured bizygomatic width.
+const CHEEK_BLUR_RATIO = 0.05;
+// Lip gradient as a fraction of measured commissure-to-commissure width — tight enough
+// to preserve mucosal texture.
+const LIP_BLUR_RATIO = 0.08;
 
 // --- CLINICAL FACIAL SIMULATION & MASK CALIBRATION ENGINE ---
 // Per-procedure calibration. blurMultiplier is a fraction of measured bizygomatic
@@ -691,6 +710,13 @@ export default function VisualizerApp() {
         ctx.fill();
       };
 
+      // Bizygomatic width (outer temple landmarks) — the shared anatomical scale anchor
+      // for every gradient below, so masks stay proportional across crop sizes.
+      const leftTemple = mappedLandmarks[FACE_LATERAL_LEFT];
+      const rightTemple = mappedLandmarks[FACE_LATERAL_RIGHT];
+      const facialWidthPx =
+        leftTemple && rightTemple ? Math.abs(rightTemple.x - leftTemple.x) : img.width * 0.45;
+
       const layerCanvas = document.createElement("canvas");
       layerCanvas.width = img.width;
       layerCanvas.height = img.height;
@@ -716,12 +742,15 @@ export default function VisualizerApp() {
           layerCtx.filter = `blur(${chinConfig.blurPx}px)`;
           fillLandmarkPoly(layerCtx, CHIN_LANDMARKS, 8);
         } else if (feat === "cheeks") {
-          // Explicit dosage matrix drives blur radius and dilation; no coordinate translation.
+          // Gradient scales with the patient's bizygomatic width; the mL dosage then
+          // scales dilation around the 1.00 mL reference so the selector still has effect.
           const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          layerCtx.filter = `blur(${dosageConfig.blurRadius}px)`;
+          const dosageScale = dosageConfig.dilationPx / CHEEK_DOSAGE_MAP["1.00ml"].dilationPx;
+          const cheekBlur = facialWidthPx * CHEEK_BLUR_RATIO;
+          layerCtx.filter = `blur(${cheekBlur.toFixed(2)}px)`;
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
             const cheekIndices = angleSortIndices(cheekIndicesRaw, mappedLandmarks);
-            fillRadialVolume(layerCtx, cheekIndices, dosageConfig.dilationPx);
+            fillRadialVolume(layerCtx, cheekIndices, cheekBlur * 0.4 * dosageScale);
           });
         } else if (feat === "nose") {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
@@ -754,10 +783,7 @@ export default function VisualizerApp() {
           // nose-derived alarWidth — the buccal hollow and jaw span a much
           // wider, vertically distinct region than the nose, so scaling
           // their blur/padding off nasal width was an anatomical mismatch.
-          const leftTemple = mappedLandmarks[234];
-          const rightTemple = mappedLandmarks[454];
-          const facialWidth =
-            leftTemple && rightTemple ? Math.abs(rightTemple.x - leftTemple.x) : img.width * 0.45;
+          const facialWidth = facialWidthPx;
 
           const activeCalibrations =
             JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
@@ -830,14 +856,31 @@ export default function VisualizerApp() {
           }
 
           layerCtx.restore();
+        } else if (feat.includes("lip")) {
+          const indices = FEATURE_INDICES[feat];
+          if (indices && indices.length > 0) {
+            // Vermilion border gradient scales with commissure-to-commissure width, so the
+            // falloff stays tight on small mouths instead of washing out mucosal texture.
+            const leftCommissure = mappedLandmarks[COMMISSURE_LEFT];
+            const rightCommissure = mappedLandmarks[COMMISSURE_RIGHT];
+            const lipWidth =
+              leftCommissure && rightCommissure
+                ? Math.abs(rightCommissure.x - leftCommissure.x)
+                : facialWidthPx * 0.35;
+            const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
+            const dosageScale = dosageConfig.dilationPx / DOSAGE_MAP["0.50ml"].dilationPx;
+            const lipBlur = lipWidth * LIP_BLUR_RATIO;
+            layerCtx.filter = `blur(${lipBlur.toFixed(2)}px)`;
+            // Solid outer lip volume only — no inner oral cutouts or stroke outlines.
+            // Natural landmark order is kept: the lip loops are already simple polygons and
+            // angle-sorting them around the centroid would flatten the cupid's bow.
+            fillLandmarkPoly(layerCtx, indices, lipBlur * 0.3 * dosageScale);
+          }
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
-            const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
-            const dilationPx = feat.includes("lip") ? Math.max(4, dosageConfig.dilationPx * 0.5) : 6;
-            layerCtx.filter = `blur(${(dilationPx * 1.5).toFixed(2)}px)`;
-            // Solid outer lip/feature volume only — no inner oral cutouts or stroke outlines.
-            fillLandmarkPoly(layerCtx, indices, dilationPx);
+            layerCtx.filter = "blur(9px)";
+            fillLandmarkPoly(layerCtx, indices, 6);
           }
         }
 
@@ -980,26 +1023,38 @@ export default function VisualizerApp() {
     setErrorMessage(null);
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
-      let maxStrength = 0.52;
+      // Each procedure requests a strength; texture-sensitive ones also register a ceiling.
+      // strength is a single global parameter, so the requested maximum is resolved first and
+      // then clamped by the *lowest* active ceiling — the most fragile selected tissue governs.
+      const requestedStrengths: number[] = [0.52];
+      const strengthCeilings: number[] = [];
 
       if (selectedFeatures.includes("chin")) {
         const chinConfig = CHIN_TECHNIQUES[chinTechnique];
         promptParts.push(chinConfig.prompt_suffix);
-        maxStrength = Math.max(maxStrength, chinConfig.strength);
+        requestedStrengths.push(chinConfig.strength);
       }
       if (selectedFeatures.includes("cheeks")) {
         const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
         const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
         promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
-        maxStrength = Math.max(maxStrength, cheekDosageConfig.strength);
+        requestedStrengths.push(cheekDosageConfig.strength);
+        strengthCeilings.push(PROCEDURE_STRENGTH_MAP.cheeks);
       }
       if (selectedFeatures.includes("brows")) {
         promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[browDensity]?.strength || 0.62);
+        requestedStrengths.push(DOSAGE_MAP[browDensity]?.strength || 0.62);
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
-        maxStrength = Math.max(maxStrength, DOSAGE_MAP[lipDosage]?.strength || 0.5);
+        requestedStrengths.push(DOSAGE_MAP[lipDosage]?.strength ?? 0.5);
+        // Vermilion tissue washes out fastest, so the lip ceilings are the lowest.
+        if (selectedFeatures.includes("upper_lip")) {
+          strengthCeilings.push(PROCEDURE_STRENGTH_MAP.upper_lip);
+        }
+        if (selectedFeatures.includes("lower_lip")) {
+          strengthCeilings.push(PROCEDURE_STRENGTH_MAP.lower_lip);
+        }
       }
       if (selectedFeatures.includes("nose")) {
         const noseConfig = NOSE_TECHNIQUES[noseTechnique];
@@ -1007,20 +1062,23 @@ export default function VisualizerApp() {
         promptParts.push(
           "reshape the full nasal unit including bridge, dorsum, sidewalls, and tip with smooth continuous contours"
         );
-        maxStrength = Math.max(maxStrength, noseConfig.strength);
+        requestedStrengths.push(noseConfig.strength);
       }
       if (selectedFeatures.includes("jawline")) {
         const calibrations =
           JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
         calibrations.forEach((key) => promptParts.push(FACIAL_CALIBRATION_CONFIG[key].prompt));
-        // strength is a single global parameter, so the most texture-sensitive selected
-        // region governs it. The calibrated ceiling is both the target and the hard cap:
-        // assigning it here raises a quieter selection up to the clinical value and pulls a
-        // co-selected nose/cheek preset back down, instead of letting either repaint grain.
-        maxStrength = Math.max(
+        const lowerFaceCeiling = Math.max(
           ...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength)
         );
+        requestedStrengths.push(lowerFaceCeiling);
+        strengthCeilings.push(lowerFaceCeiling);
       }
+
+      const maxStrength =
+        strengthCeilings.length > 0
+          ? Math.min(Math.max(...requestedStrengths), Math.min(...strengthCeilings))
+          : Math.max(...requestedStrengths);
 
       const compositePrompt = promptParts.join(" ");
 
