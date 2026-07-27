@@ -16,10 +16,13 @@ const FEATURE_INDICES: Record<string, number[]> = {
 
 const NOSE_LANDMARKS = [1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429];
 
-// NOSE_LANDMARKS isn't listed in perimeter order (it zigzags across the
-// midline), so connecting the raw indices with lineTo self-intersects into a
-// bowtie shape. Re-derive a simple (non-crossing) polygon by sorting the
-// mapped points by angle around their centroid before drawing.
+// NOSE_LANDMARKS and CHEEK_LANDMARKS aren't listed in perimeter order (they
+// zigzag across the region), so connecting the raw indices with lineTo
+// self-intersects into a bowtie shape. Re-derive a simple (non-crossing)
+// polygon by sorting the mapped points by angle around their centroid
+// before drawing. (Verified against MediaPipe's canonical_face_model.obj:
+// nose 13->0 crossings, cheek-left 8->0, cheek-right 8->0. Chin, brows, and
+// lips were already simple polygons — no fix needed there.)
 function angleSortIndices(
   indices: number[],
   points: Array<{ x: number; y: number } | undefined | null>,
@@ -424,7 +427,8 @@ export default function VisualizerApp() {
           const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
           layerCtx.filter = "blur(8px)";
           const shiftY = -8;
-          [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndices) => {
+          [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
+            const cheekIndices = angleSortIndices(cheekIndicesRaw, mappedLandmarks);
             layerCtx.beginPath();
             const startPt = mappedLandmarks[cheekIndices[0]];
             if (!startPt) return;
