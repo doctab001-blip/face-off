@@ -153,6 +153,84 @@ function expandHorizontallyAboutMidline(pts: Point[], midlineX: number, factor: 
   return pts.map((pt) => ({ x: midlineX + (pt.x - midlineX) * factor, y: pt.y }));
 }
 
+// Perioral exclusion anchors: tragus (ear attachment) and mouth commissure per side.
+const TRAGUS_LEFT = 234;
+const TRAGUS_RIGHT = 454;
+const COMMISSURE_LEFT = 61;
+const COMMISSURE_RIGHT = 291;
+// Inferior border of the lower lip. A straight tragus->commissure line still admits the
+// lower lip (it hangs below the mouth corners), so the boundary dips under this point.
+const LOWER_LIP_INFERIOR = 17;
+// Nasolabial fold origin (alar crease) per side — masks stay lateral to these.
+const NASOLABIAL_LEFT = 129;
+const NASOLABIAL_RIGHT = 358;
+
+// Clip to the region strictly inferior to the tragus -> commissure -> sub-labial boundary.
+// Lower-face masks bleed generously, so without this the mandibular stroke and buccal pads
+// reach the vermilion border and FLUX redraws the mouth.
+function clipInferiorToCommissureLine(
+  ctx: CanvasRenderingContext2D,
+  points: Array<Point | undefined | null>,
+  width: number,
+  height: number,
+  marginPx: number
+) {
+  const tragusLeft = points[TRAGUS_LEFT];
+  const tragusRight = points[TRAGUS_RIGHT];
+  const commissureLeft = points[COMMISSURE_LEFT];
+  const commissureRight = points[COMMISSURE_RIGHT];
+  if (!tragusLeft || !tragusRight || !commissureLeft || !commissureRight) return;
+
+  // Order left-to-right in image space so the polyline never doubles back.
+  const [nearTragus, farTragus] =
+    tragusLeft.x <= tragusRight.x ? [tragusLeft, tragusRight] : [tragusRight, tragusLeft];
+  const [nearCommissure, farCommissure] =
+    commissureLeft.x <= commissureRight.x
+      ? [commissureLeft, commissureRight]
+      : [commissureRight, commissureLeft];
+
+  const subLabial = points[LOWER_LIP_INFERIOR];
+  const centerX = (nearCommissure.x + farCommissure.x) / 2;
+  const centerY =
+    (subLabial?.y ?? Math.max(nearCommissure.y, farCommissure.y)) + marginPx;
+
+  const pad = Math.max(width, height);
+  ctx.beginPath();
+  ctx.moveTo(-pad, nearTragus.y);
+  ctx.lineTo(nearTragus.x, nearTragus.y);
+  ctx.lineTo(nearCommissure.x, nearCommissure.y + marginPx);
+  ctx.lineTo(centerX, centerY);
+  ctx.lineTo(farCommissure.x, farCommissure.y + marginPx);
+  ctx.lineTo(farTragus.x, farTragus.y);
+  ctx.lineTo(width + pad, farTragus.y);
+  ctx.lineTo(width + pad, height + pad);
+  ctx.lineTo(-pad, height + pad);
+  ctx.closePath();
+  ctx.clip();
+}
+
+// Clip to the half-plane lateral of one nasolabial fold, keeping buccal fills out of the
+// perioral zone between the fold and the mouth corner.
+function clipLateralToNasolabialFold(
+  ctx: CanvasRenderingContext2D,
+  foldPoint: Point | undefined | null,
+  midlineX: number | null,
+  width: number,
+  height: number
+) {
+  if (!foldPoint || midlineX === null) return;
+
+  const pad = Math.max(width, height);
+  const isLeftOfMidline = foldPoint.x < midlineX;
+  ctx.beginPath();
+  if (isLeftOfMidline) {
+    ctx.rect(-pad, -pad, foldPoint.x + pad, height + 2 * pad);
+  } else {
+    ctx.rect(foldPoint.x, -pad, width + pad - foldPoint.x, height + 2 * pad);
+  }
+  ctx.clip();
+}
+
 const CHEEK_LANDMARKS = {
   left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 227, 111, 36, 142, 100],
   right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 447, 340, 266, 371, 329],
@@ -179,21 +257,29 @@ const BUCCAL_LANDMARKS = {
 // edge path).
 const JAWLINE_LANDMARKS = [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454];
 
+// Lower-face masks sit adjacent to the mouth, where high denoise makes FLUX invent skin
+// grain and freckles. Hard ceiling — the request is to never exceed 0.50.
+const LOWER_FACE_MAX_STRENGTH = 0.48;
+
+// Texture lock appended to every lower-face prompt.
+const LOWER_FACE_PRESERVATION =
+  "subtle contouring only, exactly same skin texture, same skin tone, same lighting, no freckles, no texture change, zero perioral distortion, photorealistic";
+
 const JAWLINE_TECHNIQUES = {
   buccal_fat_removal: {
     name: "Buccal Fat Pad Removal",
-    prompt_suffix: "reduced buccal fat pad volume, slimmer contoured lower cheek hollow beneath the cheekbone, refined natural facial taper, photorealistic, same person, same skin texture, same lighting",
-    strength: 0.62,
+    prompt_suffix: `reduced buccal fat pad volume, slimmer contoured lower cheek hollow beneath the cheekbone, refined natural facial taper, same person, ${LOWER_FACE_PRESERVATION}`,
+    strength: 0.45,
   },
   jawline_slim: {
     name: "Jawline Slimming (V-Line)",
-    prompt_suffix: "slender tapered jawline, reduced mandibular width, sharp refined jaw contour, elegant V-line lower face, photorealistic, same person, same skin texture, same lighting",
-    strength: 0.65,
+    prompt_suffix: `slender tapered jawline, reduced mandibular width, sharp refined jaw contour, elegant V-line lower face, same person, ${LOWER_FACE_PRESERVATION}`,
+    strength: 0.48,
   },
   combined_contour: {
     name: "Combined Lower Face Contour",
-    prompt_suffix: "reduced buccal fat pad volume with a slender tapered V-line jawline, refined natural facial taper, photorealistic, same person, same skin texture, same lighting",
-    strength: 0.70,
+    prompt_suffix: `reduced buccal fat pad volume with a slender tapered V-line jawline, refined natural facial taper, same person, ${LOWER_FACE_PRESERVATION}`,
+    strength: 0.48,
   },
 };
 
@@ -253,31 +339,31 @@ const CHEEK_DOSAGE_MAP: Record<
 const CHIN_TECHNIQUES = {
   anterior_projection: {
     name: "Anterior Projection (Mentoplasty)",
-    prompt_suffix: "strong forward chin projection, prominent pogonion, well-defined chin tip, balanced facial profile line, photorealistic",
+    prompt_suffix: `strong forward chin projection, prominent pogonion, well-defined chin tip, balanced facial profile line, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.65,
     blurPx: 14,
   },
   chin_lengthening: {
     name: "Vertical Chin Elongation",
-    prompt_suffix: "elongated lower facial third, vertically extended chin length, defined lower mentum border, sleek proportion, photorealistic",
+    prompt_suffix: `elongated lower facial third, vertically extended chin length, defined lower mentum border, sleek proportion, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.62,
     blurPx: 14,
   },
   v_shape_slimming: {
     name: "V-Line Slimming / T-Osteotomy",
-    prompt_suffix: "slim V-line chin tip, narrowed mental apex, delicate tapered lower jawline, sleek chin contour, photorealistic",
+    prompt_suffix: `slim V-line chin tip, narrowed mental apex, delicate tapered lower jawline, sleek chin contour, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.65,
     blurPx: 14,
   },
   square_jaw_chin: {
     name: "Broad Square Chin",
-    prompt_suffix: "broad masculine square chin, strong angular mental width, wide chiseled chin border, photorealistic",
+    prompt_suffix: `broad masculine square chin, strong angular mental width, wide chiseled chin border, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.65,
     blurPx: 14,
   },
   cleft_smoothing: {
     name: "Chin Dimple / Cleft Smoothing",
-    prompt_suffix: "smooth polished chin skin, completely filled chin dimple cleft, relaxed mentalis muscle, seamless chin contour, photorealistic",
+    prompt_suffix: `smooth polished chin skin, completely filled chin dimple cleft, relaxed mentalis muscle, seamless chin contour, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.58,
     blurPx: 12,
   },
@@ -657,12 +743,40 @@ export default function VisualizerApp() {
           const drawBuccal = jawlineTechnique === "buccal_fat_removal" || jawlineTechnique === "combined_contour";
           const drawMandibularStroke = jawlineTechnique === "jawline_slim" || jawlineTechnique === "combined_contour";
 
+          // Perioral guard: everything below is clipped strictly inferior to the
+          // tragus-commissure line, so the lips and mouth corners are never inpainted.
+          const perioralMarginPx = facialWidth * 0.03;
+          layerCtx.save();
+          clipInferiorToCommissureLine(
+            layerCtx,
+            mappedLandmarks,
+            layerCanvas.width,
+            layerCanvas.height,
+            perioralMarginPx
+          );
+
           if (drawBuccal) {
             const buccalPaddingPx = facialWidth * 0.065;
             layerCtx.filter = `blur(${buccalPaddingPx.toFixed(2)}px)`;
-            [BUCCAL_LANDMARKS.left, BUCCAL_LANDMARKS.right].forEach((buccalIndicesRaw) => {
+            const midlineX = computeFacialMidlineX(mappedLandmarks);
+            (
+              [
+                [BUCCAL_LANDMARKS.left, NASOLABIAL_LEFT],
+                [BUCCAL_LANDMARKS.right, NASOLABIAL_RIGHT],
+              ] as const
+            ).forEach(([buccalIndicesRaw, nasolabialIdx]) => {
               const buccalIndices = angleSortIndices(buccalIndicesRaw, mappedLandmarks);
+              // Additionally keep each pad lateral to its own nasolabial fold.
+              layerCtx.save();
+              clipLateralToNasolabialFold(
+                layerCtx,
+                mappedLandmarks[nasolabialIdx],
+                midlineX,
+                layerCanvas.width,
+                layerCanvas.height
+              );
               fillLandmarkPoly(layerCtx, buccalIndices, buccalPaddingPx * 0.5);
+              layerCtx.restore();
             });
           }
 
@@ -671,7 +785,7 @@ export default function VisualizerApp() {
             // (234 -> 152 -> 454) rather than a filled internal polygon —
             // it bleeds outward into the background and inward onto the
             // lower cheek, giving FLUX room to redraw an actually narrower
-            // silhouette instead of just softening the existing edge.
+            // silhouette instead of only softening the existing edge.
             const jawPts = JAWLINE_LANDMARKS
               .map((idx) => mappedLandmarks[idx])
               .filter((pt): pt is { x: number; y: number } => Boolean(pt));
@@ -691,6 +805,8 @@ export default function VisualizerApp() {
               layerCtx.stroke();
             }
           }
+
+          layerCtx.restore();
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
@@ -874,6 +990,9 @@ export default function VisualizerApp() {
         const jawlineConfig = JAWLINE_TECHNIQUES[jawlineTechnique];
         promptParts.push(jawlineConfig.prompt_suffix);
         maxStrength = Math.max(maxStrength, jawlineConfig.strength);
+        // Lower-face masks abut the mouth and cheek skin: cap denoise here regardless of
+        // what other selected procedures ask for, or FLUX repaints grain and freckles.
+        maxStrength = Math.min(maxStrength, LOWER_FACE_MAX_STRENGTH);
       }
 
       const compositePrompt = promptParts.join(" ");
@@ -898,7 +1017,12 @@ export default function VisualizerApp() {
           "over-hollowed cheeks",
           "gaunt sunken appearance",
           "unnatural jaw taper",
-          "visible masseter bulge"
+          "visible masseter bulge",
+          "freckles",
+          "changed skin texture",
+          "skin grain mismatch",
+          "distorted mouth",
+          "shifted lip corners"
         );
       }
       const scopedNegativePrompt = activeNegatives.join(", ");
