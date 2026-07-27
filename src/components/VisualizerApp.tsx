@@ -183,17 +183,17 @@ const JAWLINE_TECHNIQUES = {
   buccal_fat_removal: {
     name: "Buccal Fat Pad Removal",
     prompt_suffix: "reduced buccal fat pad volume, slimmer contoured lower cheek hollow beneath the cheekbone, refined natural facial taper, photorealistic, same person, same skin texture, same lighting",
-    strength: 0.55,
+    strength: 0.62,
   },
   jawline_slim: {
     name: "Jawline Slimming (V-Line)",
     prompt_suffix: "slender tapered jawline, reduced mandibular width, sharp refined jaw contour, elegant V-line lower face, photorealistic, same person, same skin texture, same lighting",
-    strength: 0.55,
+    strength: 0.65,
   },
   combined_contour: {
     name: "Combined Lower Face Contour",
     prompt_suffix: "reduced buccal fat pad volume with a slender tapered V-line jawline, refined natural facial taper, photorealistic, same person, same skin texture, same lighting",
-    strength: 0.58,
+    strength: 0.68,
   },
 };
 
@@ -700,14 +700,20 @@ export default function VisualizerApp() {
           const rightTemple = mappedLandmarks[454];
           const facialWidth =
             leftTemple && rightTemple ? Math.abs(rightTemple.x - leftTemple.x) : img.width * 0.45;
-          const jawPaddingPx = facialWidth * 0.065;
-          layerCtx.filter = `blur(${jawPaddingPx.toFixed(2)}px)`;
+          // Blur radius (edge softness) and mask coverage width are different
+          // concerns — a thin ribbon can only soften the existing jaw edge,
+          // it can't give FLUX room to actually redraw a narrower silhouette.
+          // Widen coverage well beyond the blur radius so there's real space
+          // for the model to repaint background/shadow past the current edge.
+          const jawBlurPx = facialWidth * 0.065;
+          const jawCoveragePx = facialWidth * 0.14;
+          layerCtx.filter = `blur(${jawBlurPx.toFixed(2)}px)`;
           [BUCCAL_LANDMARKS.left, BUCCAL_LANDMARKS.right].forEach((buccalIndicesRaw) => {
             const buccalIndices = angleSortIndices(buccalIndicesRaw, mappedLandmarks);
-            fillLandmarkPoly(layerCtx, buccalIndices, jawPaddingPx * 0.5);
+            fillLandmarkPoly(layerCtx, buccalIndices, jawCoveragePx * 0.5);
           });
           const jawInteriorRef = mappedLandmarks[2] || { x: 0, y: 0 };
-          fillRibbonAlongPath(layerCtx, JAWLINE_LANDMARKS, jawPaddingPx, jawInteriorRef);
+          fillRibbonAlongPath(layerCtx, JAWLINE_LANDMARKS, jawCoveragePx, jawInteriorRef);
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
