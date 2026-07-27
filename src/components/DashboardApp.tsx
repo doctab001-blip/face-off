@@ -45,7 +45,7 @@ const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
     priceMonthly: 199,
     practitionerSeats: 1,
     simulationLimit: 100,
-    badgeColor: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+    badgeColor: "bg-blue-50 text-blue-700 border-blue-200",
     features: [
       "1 Practitioner Account",
       "100 AI Simulations / month",
@@ -60,7 +60,7 @@ const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
     priceMonthly: 499,
     practitionerSeats: 5,
     simulationLimit: 500,
-    badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    badgeColor: "bg-teal-50 text-teal-700 border-teal-200",
     features: [
       "Up to 5 Practitioner Accounts",
       "500 HD AI Simulations / month",
@@ -76,7 +76,7 @@ const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
     priceMonthly: 1299,
     practitionerSeats: "Unlimited",
     simulationLimit: "Unlimited",
-    badgeColor: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    badgeColor: "bg-indigo-50 text-indigo-700 border-indigo-200",
     features: [
       "Unlimited Practitioner Seats",
       "Unlimited High-Res AI Simulations",
@@ -91,7 +91,7 @@ const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
 
 export default function DashboardApp() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("visualizer");
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [activeFacilityId, setActiveFacilityId] = useState<string | null>(null);
   const [selectedTierForRegister, setSelectedTierForRegister] =
@@ -165,8 +165,8 @@ export default function DashboardApp() {
     return `px-3 py-1.5 rounded-lg transition ${
       active
         ? isDark
-          ? "bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30"
-          : "bg-white text-amber-800 font-semibold border border-amber-500/30 shadow-sm"
+          ? "bg-blue-500/20 text-blue-200 font-semibold border border-blue-400/30"
+          : "bg-white text-blue-700 font-semibold border border-blue-200 shadow-sm"
         : isDark
           ? "text-slate-400 hover:text-slate-200"
           : "text-slate-600 hover:text-slate-900"
@@ -175,7 +175,7 @@ export default function DashboardApp() {
 
   return (
     <div
-      className={`min-h-[100dvh] font-sans selection:bg-amber-500 selection:text-black transition-colors duration-300 ${
+      className={`min-h-[100dvh] font-sans selection:bg-blue-600 selection:text-white transition-colors duration-300 ${
         isDark ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"
       }`}
       style={{
@@ -194,7 +194,9 @@ export default function DashboardApp() {
               type="button"
               onClick={() => setActiveTab("visualizer")}
               className={`text-xl font-bold tracking-wider transition ${
-                isDark ? "text-amber-200 hover:text-amber-100" : "text-amber-700 hover:text-amber-800"
+                isDark
+                  ? "text-blue-200 hover:text-white"
+                  : "bg-gradient-to-r from-blue-700 via-blue-600 to-teal-500 bg-clip-text text-transparent hover:opacity-80"
               }`}
             >
               Face-off.ai
@@ -202,8 +204,8 @@ export default function DashboardApp() {
             <span
               className={`hidden sm:inline-block text-[10px] uppercase tracking-widest px-2.5 py-0.5 rounded border font-mono ${
                 isDark
-                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                  : "bg-amber-500/10 text-amber-700 border-amber-500/30"
+                  ? "bg-blue-500/10 text-blue-300 border-blue-400/20"
+                  : "bg-teal-50 text-teal-700 border-teal-200"
               }`}
             >
               Clinical Platform
@@ -233,7 +235,9 @@ export default function DashboardApp() {
             type="button"
             onClick={() => setTheme(isDark ? "light" : "dark")}
             className={`min-h-[36px] px-3 py-1.5 rounded-lg border text-xs font-mono ${
-              isDark ? "border-slate-700 text-slate-300" : "border-slate-300 text-slate-700"
+              isDark
+                ? "border-slate-700 text-slate-300 hover:bg-slate-800"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 shadow-sm"
             }`}
           >
             {isDark ? "Light" : "Dark"}
@@ -278,7 +282,7 @@ export default function DashboardApp() {
                       <div className={`text-[10px] uppercase ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         Monthly Simulations
                       </div>
-                      <div className={`font-semibold ${isDark ? "text-amber-400" : "text-amber-700"}`}>
+                      <div className={`font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>
                         {currentFacility.simulationsUsed} /{" "}
                         {currentFacility.simulationsLimit >= 99999 ? "∞" : currentFacility.simulationsLimit}
                       </div>
@@ -299,8 +303,8 @@ export default function DashboardApp() {
                       onClick={() => setActiveTab("pricing")}
                       className={`px-2.5 py-1 rounded border text-[11px] ${
                         isDark
-                          ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
-                          : "bg-amber-500/10 text-amber-800 border-amber-500/30"
+                          ? "bg-blue-500/20 text-blue-200 border-blue-400/30"
+                          : "bg-blue-50 text-blue-700 border-blue-200"
                       }`}
                     >
                       Register Clinic
@@ -339,7 +343,7 @@ export default function DashboardApp() {
                     }}
                     className={`text-left p-5 rounded-2xl border transition ${
                       selected
-                        ? "border-amber-500/50 bg-amber-500/10"
+                        ? "border-blue-500 bg-blue-50 shadow-sm"
                         : isDark
                           ? "border-slate-800 bg-slate-900/60 hover:border-slate-700"
                           : "border-slate-200 bg-white hover:border-slate-300 shadow-sm"
@@ -373,13 +377,13 @@ export default function DashboardApp() {
                 </p>
 
                 {registrationSuccessMsg ? (
-                  <div className="p-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-sm font-mono">
+                  <div className="p-4 rounded-xl border border-teal-200 bg-teal-50 text-teal-700 text-sm font-mono">
                     {registrationSuccessMsg}
                   </div>
                 ) : (
                   <form onSubmit={handleRegisterFacility} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <label className="block text-xs space-y-1">
-                      <span className="text-slate-400 font-mono">Facility Name</span>
+                      <span className="text-slate-600 font-mono">Facility Name</span>
                       <input
                         required
                         value={regForm.name}
@@ -390,7 +394,7 @@ export default function DashboardApp() {
                       />
                     </label>
                     <label className="block text-xs space-y-1">
-                      <span className="text-slate-400 font-mono">Admin Email</span>
+                      <span className="text-slate-600 font-mono">Admin Email</span>
                       <input
                         required
                         type="email"
@@ -402,7 +406,7 @@ export default function DashboardApp() {
                       />
                     </label>
                     <label className="block text-xs space-y-1">
-                      <span className="text-slate-400 font-mono">Primary Practitioner</span>
+                      <span className="text-slate-600 font-mono">Primary Practitioner</span>
                       <input
                         value={regForm.practitionerName}
                         onChange={(e) => setRegForm((s) => ({ ...s, practitionerName: e.target.value }))}
@@ -412,7 +416,7 @@ export default function DashboardApp() {
                       />
                     </label>
                     <label className="block text-xs space-y-1">
-                      <span className="text-slate-400 font-mono">Title / Role</span>
+                      <span className="text-slate-600 font-mono">Title / Role</span>
                       <input
                         value={regForm.practitionerTitle}
                         onChange={(e) => setRegForm((s) => ({ ...s, practitionerTitle: e.target.value }))}
@@ -422,7 +426,7 @@ export default function DashboardApp() {
                       />
                     </label>
                     <label className="block text-xs space-y-1">
-                      <span className="text-slate-400 font-mono">Phone</span>
+                      <span className="text-slate-600 font-mono">Phone</span>
                       <input
                         value={regForm.phone}
                         onChange={(e) => setRegForm((s) => ({ ...s, phone: e.target.value }))}
@@ -432,7 +436,7 @@ export default function DashboardApp() {
                       />
                     </label>
                     <label className="block text-xs space-y-1">
-                      <span className="text-slate-400 font-mono">Address</span>
+                      <span className="text-slate-600 font-mono">Address</span>
                       <input
                         value={regForm.address}
                         onChange={(e) => setRegForm((s) => ({ ...s, address: e.target.value }))}
@@ -444,7 +448,7 @@ export default function DashboardApp() {
                     <div className="md:col-span-2 flex justify-end pt-2">
                       <button
                         type="submit"
-                        className="min-h-[44px] px-6 py-2.5 rounded-xl bg-amber-400 text-slate-950 font-semibold text-xs transition shadow-lg shadow-amber-500/10"
+                        className="btn-clinical min-h-[44px] px-6 py-2.5 rounded-xl font-semibold text-xs transition"
                       >
                         Complete Facility Registration ($
                         {SUBSCRIPTION_TIERS[selectedTierForRegister].priceMonthly}/mo)
@@ -469,7 +473,7 @@ export default function DashboardApp() {
             {facilities.length === 0 ? (
               <div
                 className={`p-8 rounded-2xl border text-center ${
-                  isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"
+                  isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200 card-clinical"
                 }`}
               >
                 <p className={`text-sm mb-4 font-mono ${isDark ? "text-slate-400" : "text-slate-600"}`}>
@@ -478,7 +482,7 @@ export default function DashboardApp() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("pricing")}
-                  className="min-h-[44px] px-6 py-2.5 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950"
+                  className="btn-clinical min-h-[44px] px-6 py-2.5 rounded-xl text-xs font-semibold transition"
                 >
                   Onboard First Facility
                 </button>
@@ -515,23 +519,23 @@ export default function DashboardApp() {
                       }`}
                     >
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Simulations Run</span>
-                        <span className="text-amber-400 font-bold">
+                        <span className="text-slate-500 block text-[10px]">Simulations Run</span>
+                        <span className="text-teal-700 font-bold">
                           {fac.simulationsUsed} / {fac.simulationsLimit >= 99999 ? "∞" : fac.simulationsLimit}
                         </span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Staff Accounts</span>
+                        <span className="text-slate-500 block text-[10px]">Staff Accounts</span>
                         <span>{fac.practitioners.length} Profiles</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Registration Date</span>
+                        <span className="text-slate-500 block text-[10px]">Registration Date</span>
                         <span>{fac.registeredDate}</span>
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <span className="text-xs font-mono text-slate-400 block uppercase">
+                      <span className="text-xs font-mono text-slate-500 block uppercase">
                         Practitioner Accounts
                       </span>
                       {fac.practitioners.map((p) => (
@@ -545,11 +549,11 @@ export default function DashboardApp() {
                             <span className={`font-bold block ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                               {p.name}
                             </span>
-                            <span className="text-slate-400 block">
+                            <span className="text-slate-500 block">
                               {p.email} • {p.title}
                             </span>
                           </div>
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 text-[10px]">
+                          <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 text-[10px]">
                             {p.role}
                           </span>
                         </div>
@@ -561,7 +565,7 @@ export default function DashboardApp() {
                       onClick={() => setActiveFacilityId(fac.id)}
                       className={`mt-4 min-h-[40px] px-4 py-2 rounded-xl text-xs font-mono border transition ${
                         activeFacilityId === fac.id
-                          ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                          ? "bg-blue-50 text-blue-700 border-blue-300"
                           : isDark
                             ? "bg-slate-900 text-slate-300 border-slate-700"
                             : "bg-white text-slate-700 border-slate-300"
@@ -588,11 +592,11 @@ export default function DashboardApp() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
               <div
                 className={`p-4 rounded-xl border ${
-                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"
+                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200 card-clinical"
                 }`}
               >
-                <span className="text-slate-400 text-xs font-mono block">Monthly Recurring Revenue</span>
-                <span className="text-2xl font-bold text-emerald-400">
+                <span className="text-slate-500 text-xs font-mono block">Monthly Recurring Revenue</span>
+                <span className="text-2xl font-bold text-teal-600">
                   $
                   {facilities
                     .reduce((acc, f) => acc + SUBSCRIPTION_TIERS[f.tierId].priceMonthly, 0)
@@ -601,19 +605,19 @@ export default function DashboardApp() {
               </div>
               <div
                 className={`p-4 rounded-xl border ${
-                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"
+                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200 card-clinical"
                 }`}
               >
-                <span className="text-slate-400 text-xs font-mono block">Active Facilities</span>
-                <span className="text-2xl font-bold text-amber-400">{facilities.length}</span>
+                <span className="text-slate-500 text-xs font-mono block">Active Facilities</span>
+                <span className="text-2xl font-bold text-blue-700">{facilities.length}</span>
               </div>
               <div
                 className={`p-4 rounded-xl border ${
-                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"
+                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200 card-clinical"
                 }`}
               >
-                <span className="text-slate-400 text-xs font-mono block">Total Simulations Executed</span>
-                <span className="text-2xl font-bold text-blue-400">
+                <span className="text-slate-500 text-xs font-mono block">Total Simulations Executed</span>
+                <span className="text-2xl font-bold text-indigo-600">
                   {facilities.reduce((acc, f) => acc + f.simulationsUsed, 0)}
                 </span>
               </div>
@@ -629,12 +633,12 @@ export default function DashboardApp() {
                   <div
                     key={fac.id}
                     className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
-                      isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200"
+                      isDark ? "bg-slate-900/60 border-slate-800" : "bg-white border-slate-200 card-clinical"
                     }`}
                   >
                     <div>
                       <span className="font-bold text-sm block">{fac.name}</span>
-                      <span className="text-xs font-mono text-slate-400">
+                      <span className="text-xs font-mono text-slate-500">
                         {fac.email} • {SUBSCRIPTION_TIERS[fac.tierId].name} • {fac.simulationsUsed}/
                         {fac.simulationsLimit >= 99999 ? "∞" : fac.simulationsLimit} sims
                       </span>
@@ -650,7 +654,7 @@ export default function DashboardApp() {
                           ),
                         );
                       }}
-                      className="min-h-[44px] px-3 py-1.5 rounded border font-mono bg-amber-500/10 text-amber-300 border-amber-500/30 text-xs"
+                      className="min-h-[44px] px-3 py-1.5 rounded-lg border font-mono bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 transition text-xs"
                     >
                       +100 Credits
                     </button>

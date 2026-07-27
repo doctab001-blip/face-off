@@ -56,30 +56,32 @@ export default function ClinicAuth() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950 px-4 select-none">
-      <div className="max-w-md w-full bg-gray-900 border border-gray-800 rounded-xl p-8 shadow-2xl">
+    <div className="min-h-screen flex items-center justify-center px-4 select-none">
+      <div className="max-w-md w-full bg-white border border-slate-200 rounded-2xl p-8 card-clinical">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-serif text-amber-100 tracking-wide">Face-off.ai</h1>
-          <p className="text-sm text-gray-400 mt-2">
+          <h1 className="text-2xl font-semibold tracking-tight bg-gradient-to-r from-blue-700 via-blue-600 to-teal-500 bg-clip-text text-transparent">
+            Face-off.ai
+          </h1>
+          <p className="text-sm text-slate-600 mt-2">
             {isLogin ? "Secure Clinic Portal Login" : "Register Your Medical Facility"}
           </p>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-950/50 border border-red-500/50 rounded text-red-200 text-xs text-center">
+          <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs text-center">
             {error}
           </div>
         )}
 
         {message && (
-          <div className="mb-4 p-3 bg-emerald-950/50 border border-emerald-500/50 rounded text-emerald-200 text-xs text-center">
+          <div className="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-lg text-teal-700 text-xs text-center">
             {message}
           </div>
         )}
 
         <form onSubmit={handleAuth} className="space-y-5">
           <div>
-            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
               Authorized Email
             </label>
             <input
@@ -87,13 +89,13 @@ export default function ClinicAuth() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-gray-800 text-white border border-gray-700 rounded-md p-2.5 text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition"
+              className="w-full bg-slate-50 text-slate-900 placeholder:text-slate-400 border border-slate-200 rounded-lg p-2.5 text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20 outline-none transition"
               placeholder="admin@clinic.com"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
               Password
             </label>
             <input
@@ -101,7 +103,7 @@ export default function ClinicAuth() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-gray-800 text-white border border-gray-700 rounded-md p-2.5 text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition"
+              className="w-full bg-slate-50 text-slate-900 placeholder:text-slate-400 border border-slate-200 rounded-lg p-2.5 text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20 outline-none transition"
               placeholder="••••••••"
             />
           </div>
@@ -109,7 +111,7 @@ export default function ClinicAuth() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-2.5 rounded-md transition text-sm shadow-md"
+            className="btn-clinical w-full disabled:cursor-not-allowed font-semibold py-2.5 rounded-xl transition text-sm"
           >
             {loading ? "Processing..." : isLogin ? "Authenticate" : "Submit Registration"}
           </button>
@@ -123,7 +125,7 @@ export default function ClinicAuth() {
               setError(null);
               setMessage(null);
             }}
-            className="text-xs text-indigo-400 hover:text-indigo-300 transition"
+            className="text-xs font-medium text-blue-700 hover:text-blue-800 transition"
           >
             {isLogin
               ? "Need a facility license? Register here."

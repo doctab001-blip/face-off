@@ -1116,26 +1116,31 @@ export default function VisualizerApp() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6 text-white bg-gray-950 min-h-screen select-none">
+    <div className="max-w-7xl mx-auto p-6 space-y-6 text-slate-900 min-h-screen select-none">
       
       {/* Header */}
-      <div className="border-b border-gray-800 pb-4 flex justify-between items-center">
+      <div className="border-b border-slate-200 pb-5 flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h1 className="text-3xl font-serif tracking-wide text-amber-100">Face-off.ai</h1>
-          <p className="text-gray-400 text-sm">Clinical Aesthetic Procedure Simulator</p>
+          <h1 className="text-3xl font-semibold tracking-tight bg-gradient-to-r from-blue-700 via-blue-600 to-teal-500 bg-clip-text text-transparent">
+            Face-off.ai
+          </h1>
+          <p className="text-slate-600 text-sm mt-1">Clinical Aesthetic Procedure Simulator</p>
         </div>
+        <span className="text-[10px] uppercase tracking-widest font-semibold px-3 py-1 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+          Clinical Grade
+        </span>
       </div>
 
       {errorMessage && (
-        <div className="p-4 bg-red-950/60 border border-red-500/50 rounded-lg text-red-200 text-sm">
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-sm">
           {errorMessage}
         </div>
       )}
 
       {/* Control Panel */}
-      <div className="bg-gray-900 p-5 rounded-xl border border-gray-800 space-y-4">
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 card-clinical space-y-4">
         <div>
-          <label className="block text-xs font-semibold text-amber-200 uppercase tracking-wider mb-2">
+          <label className="block text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2">
             1. Select Target Procedures
           </label>
           <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
@@ -1153,14 +1158,16 @@ export default function VisualizerApp() {
                 <button
                   key={f.id}
                   onClick={() => toggleFeature(f.id)}
-                  className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition ${
+                  className={`p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between transition ${
                     active
-                      ? "bg-amber-600/20 border-amber-500 text-amber-200 font-bold"
-                      : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750"
+                      ? "bg-blue-50 border-blue-500 text-blue-800 font-semibold shadow-sm"
+                      : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-white hover:border-slate-300 hover:text-slate-900"
                   }`}
                 >
                   <span>{f.label}</span>
-                  <span className="text-xs">{active ? "✓" : "+"}</span>
+                  <span className={`text-xs ${active ? "text-teal-600" : "text-slate-400"}`}>
+                    {active ? "✓" : "+"}
+                  </span>
                 </button>
               );
             })}
@@ -1168,19 +1175,24 @@ export default function VisualizerApp() {
         </div>
 
         {/* Sub-Controls Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-gray-800">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-200">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Upload Photo</label>
-            <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm text-gray-300 w-full" />
+            <label className="block text-xs font-medium text-slate-600 mb-1">Upload Photo</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="text-sm text-slate-700 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-blue-700"
+            />
           </div>
 
           {selectedFeatures.includes("chin") && (
             <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Chin Procedure Preset</label>
+              <label className="block text-xs font-medium text-blue-700 mb-1">Chin Procedure Preset</label>
               <select
                 value={chinTechnique}
                 onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
-                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
                   <option key={key} value={key}>{item.name}</option>
@@ -1191,11 +1203,11 @@ export default function VisualizerApp() {
 
           {selectedFeatures.includes("jawline") && (
             <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Jawline / Buccal Fat Preset</label>
+              <label className="block text-xs font-medium text-blue-700 mb-1">Jawline / Buccal Fat Preset</label>
               <select
                 value={jawlineTechnique}
                 onChange={(e) => setJawlineTechnique(e.target.value as keyof typeof JAWLINE_TECHNIQUES)}
-                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 {Object.entries(JAWLINE_TECHNIQUES).map(([key, item]) => (
                   <option key={key} value={key}>{item.name}</option>
@@ -1206,12 +1218,12 @@ export default function VisualizerApp() {
 
           {selectedFeatures.includes("cheeks") && (
             <div className="space-y-2">
-              <label className="block text-xs text-amber-300 font-medium">Cheek Technique & Volume</label>
+              <label className="block text-xs font-medium text-blue-700">Cheek Technique & Volume</label>
               <div className="flex gap-2">
                 <select
                   value={cheekTechnique}
                   onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
-                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs flex-1 font-medium"
+                  className="flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
                     <option key={key} value={key}>{item.name}</option>
@@ -1220,7 +1232,7 @@ export default function VisualizerApp() {
                 <select
                   value={cheekDosage}
                   onChange={(e) => setCheekDosage(e.target.value)}
-                  className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-28 font-medium"
+                  className="w-28 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option value="0.50ml">0.50 mL/side</option>
                   <option value="1.00ml">1.00 mL/side</option>
@@ -1232,11 +1244,11 @@ export default function VisualizerApp() {
 
           {selectedFeatures.includes("nose") && (
             <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Rhinoplasty Preset</label>
+              <label className="block text-xs font-medium text-blue-700 mb-1">Rhinoplasty Preset</label>
               <select
                 value={noseTechnique}
                 onChange={(e) => setNoseTechnique(e.target.value as keyof typeof NOSE_TECHNIQUES)}
-                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 {Object.entries(NOSE_TECHNIQUES).map(([key, item]) => (
                   <option key={key} value={key}>{item.name}</option>
@@ -1247,12 +1259,12 @@ export default function VisualizerApp() {
 
           {selectedFeatures.includes("brows") && (
             <div className="space-y-2">
-              <label className="block text-xs text-gray-400">Eyebrow Style & Thickness</label>
+              <label className="block text-xs font-medium text-slate-600">Eyebrow Style & Thickness</label>
               <div className="flex gap-2">
                 <select
                   value={browTechnique}
                   onChange={(e) => setBrowTechnique(e.target.value as keyof typeof BROW_TECHNIQUES)}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
+                  className="flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option value="ombre_powder">Ombré Powder</option>
                   <option value="microblading">Microblading</option>
@@ -1261,7 +1273,7 @@ export default function VisualizerApp() {
                 <select
                   value={browThickness}
                   onChange={(e) => setBrowThickness(e.target.value as "thin" | "medium" | "thick")}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
+                  className="w-24 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option value="thin">Thin</option>
                   <option value="medium">Medium</option>
@@ -1273,12 +1285,12 @@ export default function VisualizerApp() {
 
           {(selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Lip Technique & Dosage</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Lip Technique & Dosage</label>
               <div className="flex gap-2">
                 <select
                   value={lipTechnique}
                   onChange={(e) => setLipTechnique(e.target.value as keyof typeof LIP_TECHNIQUES)}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
+                  className="flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option value="russian">Russian Lift</option>
                   <option value="classic_lip">Classic 3D</option>
@@ -1286,7 +1298,7 @@ export default function VisualizerApp() {
                 <select
                   value={lipDosage}
                   onChange={(e) => setLipDosage(e.target.value)}
-                  className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-24"
+                  className="w-24 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option value="0.25ml">0.25ml</option>
                   <option value="0.50ml">0.50ml</option>
@@ -1303,7 +1315,7 @@ export default function VisualizerApp() {
         <button
           onClick={handleGeneratePreview}
           disabled={!mappedLandmarks || loading}
-          className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md"
+          className="btn-clinical disabled:cursor-not-allowed font-semibold py-3 px-8 rounded-xl transition text-sm"
         >
           {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
         </button>
@@ -1314,14 +1326,14 @@ export default function VisualizerApp() {
       {/* 50/50 Split View Grid Layout with Fullscreen Expanders */}
       {croppedImageSrc && (
         <div className="w-full max-w-7xl mx-auto mt-6">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-sm font-medium text-amber-200">
-              {resultImage ? "Multi-Procedure Before & After Comparison:" : "Baseline Preview:"}
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
+            <span className="text-sm font-semibold text-slate-900">
+              {resultImage ? "Multi-Procedure Before & After Comparison" : "Baseline Preview"}
             </span>
             {resultImage && (
               <button
                 onClick={handleExportPDF}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition"
+                className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 transition shadow-sm"
               >
                 📄 Export Patient Summary (PDF)
               </button>
@@ -1332,13 +1344,15 @@ export default function VisualizerApp() {
             
             {/* BEFORE COLUMN */}
             {(viewMode === "split" || viewMode === "before") && (
-              <div className="relative rounded-lg overflow-hidden bg-black group flex items-center justify-center min-h-[450px] border border-gray-800">
+              <div className="relative rounded-2xl overflow-hidden bg-slate-100 group flex items-center justify-center min-h-[450px] border border-slate-200 card-clinical">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={croppedImageSrc} alt="Before" className="w-full h-auto max-h-[85vh] object-contain" />
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded font-mono shadow-md">BEFORE</span>
+                <span className="absolute bottom-3 left-3 bg-white/95 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+                  BEFORE
+                </span>
                 <button
                   onClick={() => setViewMode(viewMode === "split" ? "before" : "split")}
-                  className="absolute top-3 right-3 bg-gray-900/80 hover:bg-amber-500 hover:text-black text-gray-300 text-xs font-semibold px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 shadow-lg"
+                  className="absolute top-3 right-3 bg-white/95 hover:bg-blue-600 hover:text-white text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 transition-all opacity-0 group-hover:opacity-100 shadow-sm"
                 >
                   {viewMode === "split" ? "⤢ Fullscreen" : "⤡ Split View"}
                 </button>
@@ -1347,27 +1361,27 @@ export default function VisualizerApp() {
 
             {/* AFTER COLUMN */}
             {(viewMode === "split" || viewMode === "after") && (
-              <div className="relative rounded-lg overflow-hidden bg-gray-950 flex flex-col items-center justify-center min-h-[450px] group border border-gray-800">
+              <div className="relative rounded-2xl overflow-hidden bg-slate-50 flex flex-col items-center justify-center min-h-[450px] group border border-slate-200 card-clinical">
                 {resultImage ? (
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={resultImage} alt="After" className="w-full h-auto max-h-[85vh] object-contain" />
-                    <span className="absolute bottom-3 right-3 bg-amber-500 text-black text-xs px-3 py-1.5 rounded font-bold font-mono shadow-md">
+                    <span className="absolute bottom-3 right-3 bg-gradient-to-r from-blue-600 to-teal-500 text-white text-xs px-3 py-1.5 rounded-lg font-semibold shadow-sm">
                       AFTER ({selectedFeatures.join(" + ").toUpperCase()})
                     </span>
                     <button
                       onClick={() => setViewMode(viewMode === "split" ? "after" : "split")}
-                      className="absolute top-3 right-3 bg-gray-900/80 hover:bg-amber-500 hover:text-black text-gray-300 text-xs font-semibold px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 shadow-lg"
+                      className="absolute top-3 right-3 bg-white/95 hover:bg-blue-600 hover:text-white text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 transition-all opacity-0 group-hover:opacity-100 shadow-sm"
                     >
                       {viewMode === "split" ? "⤢ Fullscreen" : "⤡ Split View"}
                     </button>
                   </>
                 ) : (
-                  <div className="text-gray-500 text-sm font-mono text-center px-6">
+                  <div className="text-slate-500 text-sm text-center px-6">
                     {loading ? (
                       <div className="flex flex-col items-center gap-3">
-                        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-amber-500">Rendering AI Simulation...</span>
+                        <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-blue-700 font-medium">Rendering AI Simulation...</span>
                       </div>
                     ) : (
                       "Select procedures and click 'Run Simulation' to generate clinical results."
@@ -1382,9 +1396,9 @@ export default function VisualizerApp() {
       )}
 
       {/* Footer */}
-      <footer className="text-center pt-6 border-t border-gray-900 text-xs text-gray-500">
+      <footer className="text-center pt-6 border-t border-slate-200 text-xs text-slate-500">
         <p>
-          <strong>Medical Disclaimer:</strong> This tool utilizes generative artificial intelligence for educational and patient consultation purposes only. It does not guarantee surgical or clinical outcomes. Treatment planning requires an in-person clinical consultation with a licensed physician.
+          <strong className="text-slate-700">Medical Disclaimer:</strong> This tool utilizes generative artificial intelligence for educational and patient consultation purposes only. It does not guarantee surgical or clinical outcomes. Treatment planning requires an in-person clinical consultation with a licensed physician.
         </p>
       </footer>
     </div>
