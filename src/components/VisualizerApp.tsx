@@ -236,8 +236,8 @@ function clipLateralToNasolabialFold(
 }
 
 const CHEEK_LANDMARKS = {
-  left: [116, 123, 117, 118, 101, 50, 187, 207, 205, 227, 111, 36, 142, 100],
-  right: [345, 352, 346, 347, 330, 280, 411, 427, 425, 447, 340, 266, 371, 329],
+  left: [116, 123, 147, 213, 192, 137, 123, 50, 205, 187],
+  right: [345, 352, 376, 433, 416, 366, 352, 280, 425, 411],
 };
 
 // Fixed Bug #2: Removed duplicate index 18
@@ -742,16 +742,25 @@ export default function VisualizerApp() {
           layerCtx.filter = `blur(${chinConfig.blurPx}px)`;
           fillLandmarkPoly(layerCtx, CHIN_LANDMARKS, 8);
         } else if (feat === "cheeks") {
-          // Gradient scales with the patient's bizygomatic width; the mL dosage then
-          // scales dilation around the 1.00 mL reference so the selector still has effect.
-          const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          const dosageScale = dosageConfig.dilationPx / CHEEK_DOSAGE_MAP["1.00ml"].dilationPx;
-          const cheekBlur = facialWidthPx * CHEEK_BLUR_RATIO;
-          layerCtx.filter = `blur(${cheekBlur.toFixed(2)}px)`;
-          [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
-            const cheekIndices = angleSortIndices(cheekIndicesRaw, mappedLandmarks);
-            fillRadialVolume(layerCtx, cheekIndices, cheekBlur * 0.4 * dosageScale);
-          });
+          const leftCheekNode = mappedLandmarks[234];
+          const rightCheekNode = mappedLandmarks[454];
+          const facialWidth = leftCheekNode && rightCheekNode
+            ? Math.abs(rightCheekNode.x - leftCheekNode.x)
+            : img.width * 0.45;
+
+          const cheekBlurRadius = facialWidth * 0.06;
+          layerCtx.filter = `blur(${cheekBlurRadius.toFixed(2)}px)`;
+          layerCtx.fillStyle = "white";
+
+          if (CHEEK_LANDMARKS.left && CHEEK_LANDMARKS.right) {
+            [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
+              const validIndices = cheekIndicesRaw.filter(idx => mappedLandmarks[idx] !== undefined);
+              if (validIndices.length > 2) {
+                const sortedIndices = angleSortIndices(validIndices, mappedLandmarks);
+                fillLandmarkPoly(layerCtx, sortedIndices, cheekBlurRadius * 0.5);
+              }
+            });
+          }
         } else if (feat === "nose") {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
           const rawNosePts = getLandmarkPoints(noseIndices, mappedLandmarks);
