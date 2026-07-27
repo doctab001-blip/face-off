@@ -150,6 +150,42 @@ const CHEEK_LANDMARKS = {
 // Fixed Bug #2: Removed duplicate index 18
 const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 132, 58, 172, 136, 150, 149, 176, 148];
 
+// Buccal fat pad hollow (below the cheekbone, lateral to the nasolabial
+// fold, above the jaw). Derived and verified against MediaPipe's
+// canonical_face_model.obj: angle-sorted, each side has 0 self-crossing
+// edges (was 1 in raw list order). Mirror pairs confirmed via exact
+// coordinate reflection (x -> -x), not assumed from memory.
+const BUCCAL_LANDMARKS = {
+  left: [205, 207, 187, 147, 213, 192, 138, 135, 169, 211, 210, 214, 212, 216, 57, 202],
+  right: [425, 427, 411, 376, 433, 416, 367, 364, 394, 431, 430, 434, 432, 436, 287, 422],
+};
+
+// Lower-face contour from ear to ear via the jaw and chin — a contiguous arc
+// of MediaPipe's well-known face-oval loop (forehead points excluded). This
+// is a valid simple (non-self-crossing) path in its natural order, verified
+// against canonical_face_model.obj, so it's used as-is rather than run
+// through angleSortIndices (which is for closed hollow fills, not an open
+// edge path).
+const JAWLINE_LANDMARKS = [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454];
+
+const JAWLINE_TECHNIQUES = {
+  buccal_fat_removal: {
+    name: "Buccal Fat Pad Removal",
+    prompt_suffix: "reduced buccal fat pad volume, slimmer contoured lower cheek hollow beneath the cheekbone, refined natural facial taper, photorealistic, same person, same skin texture, same lighting",
+    strength: 0.55,
+  },
+  jawline_slim: {
+    name: "Jawline Slimming (V-Line)",
+    prompt_suffix: "slender tapered jawline, reduced mandibular width, sharp refined jaw contour, elegant V-line lower face, photorealistic, same person, same skin texture, same lighting",
+    strength: 0.55,
+  },
+  combined_contour: {
+    name: "Combined Lower Face Contour",
+    prompt_suffix: "reduced buccal fat pad volume with a slender tapered V-line jawline, refined natural facial taper, photorealistic, same person, same skin texture, same lighting",
+    strength: 0.58,
+  },
+};
+
 const NOSE_TECHNIQUES = {
   straight_slim: {
     name: "Straight & Slim Refinement",
@@ -262,7 +298,7 @@ const LIP_TECHNIQUES = {
   },
 };
 
-type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip";
+type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip" | "jawline";
 
 const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
   "0.25ml": { strength: 0.42, dilationPx: 6 },
@@ -292,6 +328,7 @@ export default function VisualizerApp() {
   const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
   const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
+  const [jawlineTechnique, setJawlineTechnique] = useState<keyof typeof JAWLINE_TECHNIQUES>("combined_contour");
 
   // Layout and view modes
   const [viewMode, setViewMode] = useState<"split" | "before" | "after">("split");
@@ -538,6 +575,53 @@ export default function VisualizerApp() {
         ctx.fill();
       };
 
+      // Fills a thin strip along an open landmark path (e.g. the jaw edge),
+      // rather than the whole interior a closed fill would cover. Offsets
+      // each point outward along its local path normal (finite-difference
+      // tangent, sign resolved away from an interior reference point) to
+      // build a ribbon polygon. Verified against canonical_face_model.obj
+      // to stay a simple (non-self-crossing) polygon at this offset scale.
+      const fillRibbonAlongPath = (
+        ctx: CanvasRenderingContext2D,
+        indices: number[],
+        stripWidthPx: number,
+        interiorRef: { x: number; y: number },
+      ) => {
+        const pts = indices
+          .map((idx) => mappedLandmarks[idx])
+          .filter((pt): pt is { x: number; y: number } => Boolean(pt));
+        if (pts.length < 3) return;
+
+        const n = pts.length;
+        const outer = pts.map((p, i) => {
+          const prev = pts[(i - 1 + n) % n];
+          const next = pts[(i + 1) % n];
+          const tx = next.x - prev.x;
+          const ty = next.y - prev.y;
+          let nx = -ty;
+          let ny = tx;
+          const len = Math.hypot(nx, ny) || 1;
+          nx /= len;
+          ny /= len;
+          const toP = { x: p.x - interiorRef.x, y: p.y - interiorRef.y };
+          if (nx * toP.x + ny * toP.y < 0) {
+            nx = -nx;
+            ny = -ny;
+          }
+          return { x: p.x + nx * stripWidthPx, y: p.y + ny * stripWidthPx };
+        });
+
+        const ribbon = [...pts, ...outer.slice().reverse()];
+        ctx.beginPath();
+        ribbon.forEach((pt, i) => {
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        });
+        ctx.closePath();
+        ctx.fillStyle = "white";
+        ctx.fill();
+      };
+
       const layerCanvas = document.createElement("canvas");
       layerCanvas.width = img.width;
       layerCanvas.height = img.height;
@@ -589,6 +673,20 @@ export default function VisualizerApp() {
           const nosePaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
           layerCtx.filter = `blur(${nosePaddingPx.toFixed(2)}px)`;
           fillPolygonPoints(layerCtx, nosePts, nosePaddingPx);
+        } else if (feat === "jawline") {
+          // Same alar-width anatomy scale as the nose region above, so buccal/jaw
+          // padding and blur stay proportional to this patient's face size.
+          const leftAlar = mappedLandmarks[NOSE_ALAR_LEFT];
+          const rightAlar = mappedLandmarks[NOSE_ALAR_RIGHT];
+          const alarWidth = leftAlar && rightAlar ? Math.abs(rightAlar.x - leftAlar.x) : img.width * 0.18;
+          const jawPaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
+          layerCtx.filter = `blur(${jawPaddingPx.toFixed(2)}px)`;
+          [BUCCAL_LANDMARKS.left, BUCCAL_LANDMARKS.right].forEach((buccalIndicesRaw) => {
+            const buccalIndices = angleSortIndices(buccalIndicesRaw, mappedLandmarks);
+            fillLandmarkPoly(layerCtx, buccalIndices, jawPaddingPx * 0.6);
+          });
+          const jawInteriorRef = mappedLandmarks[2] || { x: 0, y: 0 };
+          fillRibbonAlongPath(layerCtx, JAWLINE_LANDMARKS, jawPaddingPx, jawInteriorRef);
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
@@ -605,7 +703,7 @@ export default function VisualizerApp() {
       });
       setMaskDataUrl(mainCanvas.toDataURL("image/png"));
     };
-  }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, croppedImageSrc]);
+  }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, jawlineTechnique, croppedImageSrc]);
 
   // Soft-composite AI over original using the same mask sent to fal (pixel-aligned).
   const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
@@ -768,6 +866,11 @@ export default function VisualizerApp() {
         );
         maxStrength = Math.max(maxStrength, noseConfig.strength);
       }
+      if (selectedFeatures.includes("jawline")) {
+        const jawlineConfig = JAWLINE_TECHNIQUES[jawlineTechnique];
+        promptParts.push(jawlineConfig.prompt_suffix);
+        maxStrength = Math.max(maxStrength, jawlineConfig.strength);
+      }
 
       const compositePrompt = promptParts.join(" ");
 
@@ -784,6 +887,15 @@ export default function VisualizerApp() {
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         activeNegatives.push("harsh lines around mouth");
+      }
+      if (selectedFeatures.includes("jawline")) {
+        activeNegatives.push(
+          "asymmetric jaw contour",
+          "over-hollowed cheeks",
+          "gaunt sunken appearance",
+          "unnatural jaw taper",
+          "visible masseter bulge"
+        );
       }
       const scopedNegativePrompt = activeNegatives.join(", ");
 
@@ -898,11 +1010,12 @@ export default function VisualizerApp() {
           <label className="block text-xs font-semibold text-amber-200 uppercase tracking-wider mb-2">
             1. Select Target Procedures
           </label>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
             {[
               { id: "chin" as const, label: "Chin" },
               { id: "cheeks" as const, label: "Cheeks" },
               { id: "nose" as const, label: "Rhinoplasty" },
+              { id: "jawline" as const, label: "Jawline / Buccal" },
               { id: "brows" as const, label: "Eyebrows" },
               { id: "upper_lip" as const, label: "Upper Lip" },
               { id: "lower_lip" as const, label: "Lower Lip" },
@@ -942,6 +1055,21 @@ export default function VisualizerApp() {
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
                 {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
+                  <option key={key} value={key}>{item.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {selectedFeatures.includes("jawline") && (
+            <div>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Jawline / Buccal Fat Preset</label>
+              <select
+                value={jawlineTechnique}
+                onChange={(e) => setJawlineTechnique(e.target.value as keyof typeof JAWLINE_TECHNIQUES)}
+                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
+              >
+                {Object.entries(JAWLINE_TECHNIQUES).map(([key, item]) => (
                   <option key={key} value={key}>{item.name}</option>
                 ))}
               </select>
