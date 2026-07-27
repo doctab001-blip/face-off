@@ -692,16 +692,19 @@ export default function VisualizerApp() {
           layerCtx.filter = `blur(${Math.max(NOSE_BLUR_PX, nosePaddingPx).toFixed(2)}px)`;
           fillPolygonPoints(layerCtx, nosePts, nosePaddingPx);
         } else if (feat === "jawline") {
-          // Same alar-width anatomy scale as the nose region above, so buccal/jaw
-          // padding and blur stay proportional to this patient's face size.
-          const leftAlar = mappedLandmarks[NOSE_ALAR_LEFT];
-          const rightAlar = mappedLandmarks[NOSE_ALAR_RIGHT];
-          const alarWidth = leftAlar && rightAlar ? Math.abs(rightAlar.x - leftAlar.x) : img.width * 0.18;
-          const jawPaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
+          // Facial width anchor (outer temple landmarks 234/454) instead of
+          // nose-derived alarWidth — the buccal hollow and jaw span a much
+          // wider, vertically distinct region than the nose, so scaling
+          // their blur/padding off nasal width was an anatomical mismatch.
+          const leftTemple = mappedLandmarks[234];
+          const rightTemple = mappedLandmarks[454];
+          const facialWidth =
+            leftTemple && rightTemple ? Math.abs(rightTemple.x - leftTemple.x) : img.width * 0.45;
+          const jawPaddingPx = facialWidth * 0.065;
           layerCtx.filter = `blur(${jawPaddingPx.toFixed(2)}px)`;
           [BUCCAL_LANDMARKS.left, BUCCAL_LANDMARKS.right].forEach((buccalIndicesRaw) => {
             const buccalIndices = angleSortIndices(buccalIndicesRaw, mappedLandmarks);
-            fillLandmarkPoly(layerCtx, buccalIndices, jawPaddingPx * 0.6);
+            fillLandmarkPoly(layerCtx, buccalIndices, jawPaddingPx * 0.5);
           });
           const jawInteriorRef = mappedLandmarks[2] || { x: 0, y: 0 };
           fillRibbonAlongPath(layerCtx, JAWLINE_LANDMARKS, jawPaddingPx, jawInteriorRef);
