@@ -24,7 +24,27 @@ const NOSE_EXPANSION_RATIO = 0.22;
 const NOSE_ALAR_LEFT = 129;
 const NOSE_ALAR_RIGHT = 358;
 
+// Midline anchors: inner eye corners (primary), then nasal bridge root, then nasal tip.
+const EYE_INNER_LEFT = 133;
+const EYE_INNER_RIGHT = 362;
+const NOSE_BRIDGE_ROOT = 168;
+const NOSE_TIP = 1;
+
 type Point = { x: number; y: number };
+
+// True facial midline (X_mid). The inner canthi are the most stable bilateral pair for
+// this axis; the bridge root and tip serve as single-point fallbacks.
+function computeFacialMidlineX(points: Array<Point | undefined | null>): number | null {
+  const innerLeft = points[EYE_INNER_LEFT];
+  const innerRight = points[EYE_INNER_RIGHT];
+  if (innerLeft && innerRight) return (innerLeft.x + innerRight.x) / 2;
+
+  const bridgeRoot = points[NOSE_BRIDGE_ROOT];
+  if (bridgeRoot) return bridgeRoot.x;
+
+  const tip = points[NOSE_TIP];
+  return tip ? tip.x : null;
+}
 
 function getLandmarkPoints(indices: number[], points: Array<Point | undefined | null>): Point[] {
   return indices
@@ -84,6 +104,42 @@ function angleSortIndices(
         Math.atan2(b.pt.y - centroid.y, b.pt.x - centroid.x),
     )
     .map((e) => e.idx);
+}
+
+// Angle-sort raw points (same rationale as angleSortIndices) into a simple perimeter.
+function angleSortPoints(pts: Point[]): Point[] {
+  if (pts.length < 3) return pts;
+  const centroid = {
+    x: pts.reduce((sum, p) => sum + p.x, 0) / pts.length,
+    y: pts.reduce((sum, p) => sum + p.y, 0) / pts.length,
+  };
+  return [...pts].sort(
+    (a, b) =>
+      Math.atan2(a.y - centroid.y, a.x - centroid.x) -
+      Math.atan2(b.y - centroid.y, b.x - centroid.x)
+  );
+}
+
+// Force bilateral symmetry about X_mid: every landmark contributes its own position and its
+// mirrored counterpart, so any lateral drift in the raw mesh cancels out. The resulting
+// polygon's horizontal bounding-box center is then pinned exactly to X_mid.
+function buildMidlineSymmetricPolygon(pts: Point[], midlineX: number): Point[] {
+  if (pts.length < 3) return pts;
+
+  const deduped = new Map<string, Point>();
+  pts.forEach((pt) => {
+    [pt, { x: 2 * midlineX - pt.x, y: pt.y }].forEach((candidate) => {
+      const key = `${candidate.x.toFixed(2)}:${candidate.y.toFixed(2)}`;
+      if (!deduped.has(key)) deduped.set(key, candidate);
+    });
+  });
+
+  const symmetric = angleSortPoints([...deduped.values()]);
+  const xs = symmetric.map((p) => p.x);
+  const boxCenterX = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const correction = midlineX - boxCenterX;
+
+  return symmetric.map((p) => ({ x: p.x + correction, y: p.y }));
 }
 
 const CHEEK_LANDMARKS = {
@@ -412,12 +468,11 @@ export default function VisualizerApp() {
       mainCtx.fillStyle = "black";
       mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
 
-      const fillLandmarkPoly = (
+      const fillPolygonPoints = (
         ctx: CanvasRenderingContext2D,
-        indices: number[],
+        pts: Point[],
         inflatePx = 0
       ) => {
-        const pts = getLandmarkPoints(indices, mappedLandmarks);
         if (pts.length < 3) return;
 
         const { centroid } = getLandmarkMetrics(pts);
@@ -439,6 +494,14 @@ export default function VisualizerApp() {
         ctx.closePath();
         ctx.fillStyle = "white";
         ctx.fill();
+      };
+
+      const fillLandmarkPoly = (
+        ctx: CanvasRenderingContext2D,
+        indices: number[],
+        inflatePx = 0
+      ) => {
+        fillPolygonPoints(ctx, getLandmarkPoints(indices, mappedLandmarks), inflatePx);
       };
 
       // Linear alpha ramp: 1.0 at the core landmark locus → 0.0 at the outer boundary radius.
@@ -509,7 +572,11 @@ export default function VisualizerApp() {
           });
         } else if (feat === "nose") {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
-          const nosePts = getLandmarkPoints(noseIndices, mappedLandmarks);
+          const rawNosePts = getLandmarkPoints(noseIndices, mappedLandmarks);
+          const midlineX = computeFacialMidlineX(mappedLandmarks);
+          // Mirror every landmark about X_mid so the mask cannot inherit lateral mesh drift.
+          const nosePts =
+            midlineX !== null ? buildMidlineSymmetricPolygon(rawNosePts, midlineX) : rawNosePts;
           const noseMetrics = nosePts.length >= 3 ? getLandmarkMetrics(nosePts) : null;
           const leftAlar = mappedLandmarks[NOSE_ALAR_LEFT];
           const rightAlar = mappedLandmarks[NOSE_ALAR_RIGHT];
@@ -521,7 +588,7 @@ export default function VisualizerApp() {
           // dorsal hump and tip are fully covered without spilling into adjacent zones.
           const nosePaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
           layerCtx.filter = `blur(${nosePaddingPx.toFixed(2)}px)`;
-          fillLandmarkPoly(layerCtx, noseIndices, nosePaddingPx);
+          fillPolygonPoints(layerCtx, nosePts, nosePaddingPx);
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
