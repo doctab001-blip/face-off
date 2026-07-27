@@ -270,6 +270,10 @@ const PROCEDURE_STRENGTH_MAP: Record<string, number> = {
   lower_lip: 0.38,
 };
 
+// Upper bound on a single inpainting round-trip. Past this the request is aborted
+// rather than left polling, so the UI can never deadlock on a hung queue.
+const SIMULATION_TIMEOUT_MS = 30000;
+
 // Cheek gradient as a fraction of measured bizygomatic width.
 const CHEEK_BLUR_RATIO = 0.05;
 // Lip gradient as a fraction of measured commissure-to-commissure width — tight enough
@@ -1015,6 +1019,9 @@ export default function VisualizerApp() {
   const USER_SIMULATION_ERROR =
     "Simulation failed — please try again. Check console for details.";
 
+  const USER_SIMULATION_TIMEOUT_ERROR =
+    "Simulation timed out after 30 seconds — please try again.";
+
   const handleGeneratePreview = async () => {
     // A second click while a request is in flight would race the first and leave
     // the button state owned by whichever promise settles last.
@@ -1037,6 +1044,20 @@ export default function VisualizerApp() {
     }
     setLoading(true);
     setErrorMessage(null);
+
+    // Failsafe against a hung request. Aborting the signal is what actually frees the
+    // app — clearing `loading` alone would leave the fal call polling in the background
+    // and let a late response overwrite the timeout state.
+    let timedOut = false;
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+      console.error(`Simulation timed out after ${SIMULATION_TIMEOUT_MS / 1000} seconds.`);
+      setErrorMessage(USER_SIMULATION_TIMEOUT_ERROR);
+      setLoading(false);
+    }, SIMULATION_TIMEOUT_MS);
+
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
       // Each procedure requests a strength; texture-sensitive ones also register a ceiling.
@@ -1140,8 +1161,11 @@ export default function VisualizerApp() {
           strength: maxStrength,
           enable_safety_checker: true,
         },
+        abortSignal: abortController.signal,
       });
-      
+
+      if (timedOut) return;
+
       if (result.data?.images?.[0]?.url) {
         const rawAiUrl = result.data.images[0].url;
         const featheredUrl = await applyEdgeFeathering(croppedImageSrc, rawAiUrl, maskDataUrl);
@@ -1152,8 +1176,9 @@ export default function VisualizerApp() {
       }
     } catch (err: unknown) {
       logSimulationErrorDetails("Composite Simulation Execution Error:", err);
-      setErrorMessage(USER_SIMULATION_ERROR);
+      setErrorMessage(timedOut ? USER_SIMULATION_TIMEOUT_ERROR : USER_SIMULATION_ERROR);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
