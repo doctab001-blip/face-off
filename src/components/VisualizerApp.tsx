@@ -19,7 +19,49 @@ const NOSE_LANDMARKS = [
   164,
 ];
 
-const NOSE_MASK_INFLATE_PX = 20;
+// Mask expansion is anatomy-relative: 28% of the inter-alar (nostril base) width.
+const NOSE_EXPANSION_RATIO = 0.28;
+const NOSE_ALAR_LEFT = 129;
+const NOSE_ALAR_RIGHT = 358;
+
+// Bizygomatic reference width (px) that the tabulated cheek dilation values were authored against.
+const CHEEK_REFERENCE_BIZYGOMATIC_PX = 360;
+// Zygomatic projection reach as a fraction of measured bizygomatic width.
+const CHEEK_PROJECTION_RATIO = 0.035;
+const FACE_LATERAL_LEFT = 234;
+const FACE_LATERAL_RIGHT = 454;
+
+type Point = { x: number; y: number };
+
+function getLandmarkPoints(indices: number[], points: Array<Point | undefined | null>): Point[] {
+  return indices
+    .map((idx) => points[idx])
+    .filter((pt): pt is Point => Boolean(pt))
+    .map((pt) => ({ x: pt.x, y: pt.y }));
+}
+
+function getLandmarkMetrics(pts: Point[]) {
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const centroid = {
+    x: pts.reduce((sum, p) => sum + p.x, 0) / pts.length,
+    y: pts.reduce((sum, p) => sum + p.y, 0) / pts.length,
+  };
+  const maxRadius = pts.reduce(
+    (acc, p) => Math.max(acc, Math.hypot(p.x - centroid.x, p.y - centroid.y)),
+    0
+  );
+  return {
+    width: maxX - minX,
+    height: maxY - minY,
+    centroid,
+    maxRadius,
+  };
+}
 
 // NOSE_LANDMARKS and CHEEK_LANDMARKS aren't listed in perimeter order (they
 // zigzag across the region), so connecting the raw indices with lineTo
@@ -63,27 +105,27 @@ const NOSE_TECHNIQUES = {
   straight_slim: {
     name: "Straight & Slim Refinement",
     prompt_suffix: "flawless narrow straight nasal bridge, delicate supratip break, refined defined nasal tip cartilage, subtle alar narrowing, seamless skin texture, photorealistic, 8k resolution",
-    strength: 0.62,
+    strength: 0.55,
   },
   dorsal_hump: {
     name: "Dorsal Hump Reduction",
     prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
-    strength: 0.58,
+    strength: 0.52,
   },
   tip_plasty: {
     name: "Nasal Tip Refinement",
     prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
-    strength: 0.55,
+    strength: 0.50,
   },
   alar_reduction: {
     name: "Alar Base Narrowing",
     prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
-    strength: 0.52,
+    strength: 0.42,
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
     prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
-    strength: 0.50,
+    strength: 0.40,
   },
 };
 
@@ -103,9 +145,9 @@ const CHEEK_TECHNIQUES = {
 };
 
 const CHEEK_DOSAGE_MAP: Record<string, { strength: number; dilationPx: number; promptLabel: string }> = {
-  "0.50ml": { strength: 0.40, dilationPx: 12, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
-  "1.00ml": { strength: 0.50, dilationPx: 18, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
-  "1.50ml": { strength: 0.58, dilationPx: 24, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
+  "0.50ml": { strength: 0.32, dilationPx: 8, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
+  "1.00ml": { strength: 0.40, dilationPx: 14, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
+  "1.50ml": { strength: 0.48, dilationPx: 20, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
 };
 
 const CHIN_TECHNIQUES = {
@@ -378,28 +420,18 @@ export default function VisualizerApp() {
         indices: number[],
         inflatePx = 0
       ) => {
-        const pts = indices
-          .map((idx) => mappedLandmarks[idx])
-          .filter((pt): pt is { x: number; y: number } => Boolean(pt))
-          .map((pt) => ({ x: pt.x, y: pt.y }));
+        const pts = getLandmarkPoints(indices, mappedLandmarks);
         if (pts.length < 3) return;
 
-        let cx = 0;
-        let cy = 0;
-        pts.forEach((pt) => {
-          cx += pt.x;
-          cy += pt.y;
-        });
-        cx /= pts.length;
-        cy /= pts.length;
+        const { centroid } = getLandmarkMetrics(pts);
 
         ctx.beginPath();
         pts.forEach((pt, i) => {
           let x = pt.x;
           let y = pt.y;
           if (inflatePx > 0) {
-            const dx = pt.x - cx;
-            const dy = pt.y - cy;
+            const dx = pt.x - centroid.x;
+            const dy = pt.y - centroid.y;
             const len = Math.hypot(dx, dy) || 1;
             x = pt.x + (dx / len) * inflatePx;
             y = pt.y + (dy / len) * inflatePx;
@@ -411,6 +443,46 @@ export default function VisualizerApp() {
         ctx.fillStyle = "white";
         ctx.fill();
       };
+
+      // Radial intensity falloff — analytically smooth, so there is no vector edge to smudge.
+      const fillRadialVolume = (
+        ctx: CanvasRenderingContext2D,
+        indices: number[],
+        expansionPx: number
+      ) => {
+        const pts = getLandmarkPoints(indices, mappedLandmarks);
+        if (pts.length < 3) return;
+
+        const { centroid, maxRadius } = getLandmarkMetrics(pts);
+        const outerRadius = maxRadius + expansionPx;
+        if (outerRadius <= 0) return;
+
+        // Plateau covers the anatomical region; the remainder integrates to zero opacity.
+        const plateauStop = Math.min(0.72, maxRadius / outerRadius);
+        const gradient = ctx.createRadialGradient(
+          centroid.x,
+          centroid.y,
+          0,
+          centroid.x,
+          centroid.y,
+          outerRadius
+        );
+        gradient.addColorStop(0, "rgba(255,255,255,1)");
+        gradient.addColorStop(plateauStop, "rgba(255,255,255,1)");
+        gradient.addColorStop(Math.min(0.94, plateauStop + 0.2), "rgba(255,255,255,0.45)");
+        gradient.addColorStop(1, "rgba(255,255,255,0)");
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(centroid.x, centroid.y, outerRadius, 0, Math.PI * 2);
+        ctx.fill();
+      };
+
+      const bizygomaticWidth = (() => {
+        const left = mappedLandmarks[FACE_LATERAL_LEFT];
+        const right = mappedLandmarks[FACE_LATERAL_RIGHT];
+        return left && right ? Math.abs(right.x - left.x) : img.width * 0.6;
+      })();
 
       const layerCanvas = document.createElement("canvas");
       layerCanvas.width = img.width;
@@ -437,15 +509,30 @@ export default function VisualizerApp() {
           fillLandmarkPoly(layerCtx, CHIN_LANDMARKS, 8);
         } else if (feat === "cheeks") {
           const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          // Uniform inflate with no vertical offset — offsetting left a dark smudge border.
-          const inflate = Math.max(10, dosageConfig.dilationPx * 0.55);
+          // Scale tabulated dilation to the measured bizygomatic width, then add the
+          // zygomatic projection reach. Rendered as a radial gradient (no strokes, no shiftY).
+          const anatomicScale = bizygomaticWidth / CHEEK_REFERENCE_BIZYGOMATIC_PX;
+          const dilationPx = dosageConfig.dilationPx * anatomicScale;
+          const projectionOffsetPx = bizygomaticWidth * CHEEK_PROJECTION_RATIO;
+          const expansionPx = dilationPx + projectionOffsetPx;
+          layerCtx.filter = `blur(${(dilationPx * 1.6).toFixed(2)}px)`;
           [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
             const cheekIndices = angleSortIndices(cheekIndicesRaw, mappedLandmarks);
-            fillLandmarkPoly(layerCtx, cheekIndices, inflate);
+            fillRadialVolume(layerCtx, cheekIndices, expansionPx);
           });
         } else if (feat === "nose") {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
-          fillLandmarkPoly(layerCtx, noseIndices, NOSE_MASK_INFLATE_PX);
+          const nosePts = getLandmarkPoints(noseIndices, mappedLandmarks);
+          const noseMetrics = nosePts.length >= 3 ? getLandmarkMetrics(nosePts) : null;
+          const leftAlar = mappedLandmarks[NOSE_ALAR_LEFT];
+          const rightAlar = mappedLandmarks[NOSE_ALAR_RIGHT];
+          const interAlarWidth =
+            leftAlar && rightAlar
+              ? Math.abs(rightAlar.x - leftAlar.x)
+              : (noseMetrics?.width ?? img.width * 0.18);
+          const expansionPx = interAlarWidth * NOSE_EXPANSION_RATIO;
+          layerCtx.filter = `blur(${Math.max(10, (noseMetrics?.height ?? 0) * 0.12).toFixed(2)}px)`;
+          fillLandmarkPoly(layerCtx, noseIndices, expansionPx);
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
