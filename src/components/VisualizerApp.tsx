@@ -55,27 +55,27 @@ const NOSE_TECHNIQUES = {
   straight_slim: {
     name: "Straight & Slim Refinement",
     prompt_suffix: "flawless narrow straight nasal bridge, delicate supratip break, refined defined nasal tip cartilage, subtle alar narrowing, seamless skin texture, photorealistic, 8k resolution",
-    strength: 0.52,
+    strength: 0.62,
   },
   dorsal_hump: {
     name: "Dorsal Hump Reduction",
     prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
-    strength: 0.48,
+    strength: 0.58,
   },
   tip_plasty: {
     name: "Nasal Tip Refinement",
     prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
-    strength: 0.45,
+    strength: 0.55,
   },
   alar_reduction: {
     name: "Alar Base Narrowing",
     prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
-    strength: 0.42,
+    strength: 0.52,
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
     prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
-    strength: 0.40,
+    strength: 0.50,
   },
 };
 
@@ -95,41 +95,41 @@ const CHEEK_TECHNIQUES = {
 };
 
 const CHEEK_DOSAGE_MAP: Record<string, { strength: number; dilationPx: number; promptLabel: string }> = {
-  "0.50ml": { strength: 0.32, dilationPx: 8, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
-  "1.00ml": { strength: 0.40, dilationPx: 14, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
-  "1.50ml": { strength: 0.48, dilationPx: 20, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
+  "0.50ml": { strength: 0.40, dilationPx: 12, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
+  "1.00ml": { strength: 0.50, dilationPx: 18, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
+  "1.50ml": { strength: 0.58, dilationPx: 24, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
 };
 
 const CHIN_TECHNIQUES = {
   anterior_projection: {
     name: "Anterior Projection (Mentoplasty)",
     prompt_suffix: "strong forward chin projection, prominent pogonion, well-defined chin tip, balanced facial profile line, photorealistic",
-    strength: 0.55,
-    blurPx: 12,
+    strength: 0.65,
+    blurPx: 14,
   },
   chin_lengthening: {
     name: "Vertical Chin Elongation",
     prompt_suffix: "elongated lower facial third, vertically extended chin length, defined lower mentum border, sleek proportion, photorealistic",
-    strength: 0.52,
-    blurPx: 12,
+    strength: 0.62,
+    blurPx: 14,
   },
   v_shape_slimming: {
     name: "V-Line Slimming / T-Osteotomy",
     prompt_suffix: "slim V-line chin tip, narrowed mental apex, delicate tapered lower jawline, sleek chin contour, photorealistic",
-    strength: 0.55,
-    blurPx: 12,
+    strength: 0.65,
+    blurPx: 14,
   },
   square_jaw_chin: {
     name: "Broad Square Chin",
     prompt_suffix: "broad masculine square chin, strong angular mental width, wide chiseled chin border, photorealistic",
-    strength: 0.55,
-    blurPx: 12,
+    strength: 0.65,
+    blurPx: 14,
   },
   cleft_smoothing: {
     name: "Chin Dimple / Cleft Smoothing",
     prompt_suffix: "smooth polished chin skin, completely filled chin dimple cleft, relaxed mentalis muscle, seamless chin contour, photorealistic",
-    strength: 0.50,
-    blurPx: 10,
+    strength: 0.58,
+    blurPx: 12,
   },
 };
 
@@ -162,13 +162,13 @@ const LIP_TECHNIQUES = {
 type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip";
 
 const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
-  "0.25ml": { strength: 0.35, dilationPx: 4 },
-  "0.50ml": { strength: 0.45, dilationPx: 8 },
-  "0.75ml": { strength: 0.55, dilationPx: 12 },
-  "1.00ml": { strength: 0.65, dilationPx: 16 },
-  "tint_soft": { strength: 0.52, dilationPx: 8 },
-  "tint_medium": { strength: 0.62, dilationPx: 14 },
-  "tint_bold": { strength: 0.72, dilationPx: 20 },
+  "0.25ml": { strength: 0.42, dilationPx: 6 },
+  "0.50ml": { strength: 0.52, dilationPx: 10 },
+  "0.75ml": { strength: 0.62, dilationPx: 14 },
+  "1.00ml": { strength: 0.72, dilationPx: 18 },
+  "tint_soft": { strength: 0.58, dilationPx: 10 },
+  "tint_medium": { strength: 0.68, dilationPx: 16 },
+  "tint_bold": { strength: 0.78, dilationPx: 22 },
 };
 
 const BROW_THICKNESS_MAP: Record<string, { stroke: number; padding: number }> = {
@@ -415,7 +415,7 @@ export default function VisualizerApp() {
             layerCtx.closePath();
             layerCtx.fillStyle = "white";
             layerCtx.fill();
-            layerCtx.lineWidth = 14;
+            layerCtx.lineWidth = 16;
             layerCtx.strokeStyle = "white";
             layerCtx.lineJoin = "round";
             layerCtx.stroke();
@@ -456,7 +456,7 @@ export default function VisualizerApp() {
               layerCtx.closePath();
               layerCtx.fillStyle = "white";
               layerCtx.fill();
-              layerCtx.lineWidth = 10;
+              layerCtx.lineWidth = 16;
               layerCtx.strokeStyle = "white";
               layerCtx.lineJoin = "round";
               layerCtx.stroke();
@@ -637,7 +637,7 @@ export default function VisualizerApp() {
     setErrorMessage(null);
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
-      let maxStrength = 0.45;
+      let maxStrength = 0.52;
 
       if (selectedFeatures.includes("chin")) {
         const chinConfig = CHIN_TECHNIQUES[chinTechnique];
