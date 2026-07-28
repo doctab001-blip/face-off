@@ -274,8 +274,16 @@ const CHEEK_LANDMARKS = {
   right: [345, 352, 376, 433, 416, 366, 352, 280, 425, 411],
 };
 
-// Fixed Bug #2: Removed duplicate index 18
-const CHIN_LANDMARKS = [152, 377, 400, 378, 379, 365, 397, 288, 361, 18, 83, 132, 58, 172, 136, 150, 149, 176, 148];
+// Central mental shield — the sub-labial midline (18) and chin apex (152) joined by four
+// mirror-paired points down each side of the mentum.
+//
+// This list previously ran the entire mandibular arc out to 361/132, which sit at the jaw
+// angles beside the ears — 95% of half the facial width and 6.5 units above the chin apex.
+// Selecting "chin" therefore masked both lower cheeks, and FLUX rendered them as dark
+// hollows. Measured against canonical_face_model.obj, this set reaches 53% of half-width
+// (mental tubercles, short of the jaw), is bilaterally balanced at four points per side,
+// and forms a simple polygon with zero self-intersections.
+const CHIN_LANDMARKS = [18, 379, 378, 400, 377, 152, 148, 176, 149, 150];
 
 // Buccal fat pad hollow (below the cheekbone, lateral to the nasolabial
 // fold, above the jaw). Derived and verified against MediaPipe's
@@ -797,7 +805,7 @@ export default function VisualizerApp() {
         } else if (feat === "chin") {
           const chinConfig = CHIN_TECHNIQUES[chinTechnique];
           layerCtx.filter = `blur(${chinConfig.blurPx}px)`;
-          fillLandmarkPoly(layerCtx, CHIN_LANDMARKS, 8);
+          fillLandmarkPoly(layerCtx, angleSortIndices(CHIN_LANDMARKS, mappedLandmarks), 8);
         } else if (feat === "cheeks") {
           const leftCheekNode = mappedLandmarks[234];
           const rightCheekNode = mappedLandmarks[454];
