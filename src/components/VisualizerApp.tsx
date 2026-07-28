@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
 import { describeSimulationFailure } from "@/lib/falErrors";
@@ -333,10 +333,17 @@ const JAWLINE_LANDMARKS = [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 
 // --- CLINICAL LIPS & CHEEKS MASK & STRENGTH REFINEMENT ---
 // Calibrated denoise ceilings. Above these, FLUX flattens skin texture and smears
 // volumetric edges, so the dosage tables may raise strength only up to these values.
+//
+// RAISED from 0.42/0.38. In inpainting, `strength` is how much of the masked region the
+// model may redraw: 0.42 means "keep most of the original pixels", which is why every
+// simulation was returning a near-identical face. These ceilings still sit below 1.0 so
+// skin texture is preserved, but they now leave real headroom for volumetric change.
+// If results ever look overcooked or plastic, LOWER these numbers first — they are the
+// single most effective dial in the app.
 const PROCEDURE_STRENGTH_MAP: Record<string, number> = {
-  cheeks: 0.42, // Subdued volumetric projection to eliminate smudges
-  upper_lip: 0.38, // Gentle vermilion border eversion without texture washout
-  lower_lip: 0.38,
+  cheeks: 0.78, // Volumetric projection needs room to actually build malar height
+  upper_lip: 0.70, // Vermilion eversion without washing out mucosal texture
+  lower_lip: 0.70,
 };
 
 // Upper bound on a single inpainting round-trip. Past this the request is aborted
@@ -354,8 +361,9 @@ const SIMULATION_TIMEOUT_MS = 90000;
 const MAX_SIMULATION_DIMENSION = 1536;
 const CROP_JPEG_QUALITY = 0.92;
 
-// Cheek gradient as a fraction of measured bizygomatic width.
-const CHEEK_BLUR_RATIO = 0.05;
+// Fallback strength when no procedure registers one (defensive; a feature is always selected).
+const DEFAULT_STRENGTH = 0.65;
+
 // Lip gradient as a fraction of measured commissure-to-commissure width — tight enough
 // to preserve mucosal texture.
 const LIP_BLUR_RATIO = 0.08;
@@ -364,16 +372,16 @@ const LIP_BLUR_RATIO = 0.08;
 // Per-procedure calibration. blurMultiplier is a fraction of measured bizygomatic
 // (facial) width, so gradients stay proportional across crop sizes. maxStrength caps
 // denoise per region: lower-face masks abut cheek skin, and higher values make FLUX
-// invent grain and freckles.
+// invent grain and freckles. Raised alongside PROCEDURE_STRENGTH_MAP for the same reason.
 const FACIAL_CALIBRATION_CONFIG = {
   buccal: {
-    maxStrength: 0.50,
+    maxStrength: 0.74,
     blurMultiplier: 0.055, // 5.5% of total bizygomatic width for natural sub-malar gradient
     prompt:
       "sub-malar buccal fat pad volume reduction, natural lower cheek contouring, smooth facial taper, photorealistic, identical skin texture, exact skin tone, zero texture modification, same lighting",
   },
   jawline: {
-    maxStrength: 0.52,
+    maxStrength: 0.76,
     blurMultiplier: 0.070, // 7.0% for soft mandibular angle blending
     prompt:
       "refined mandibular angle contour, subtle V-line lower face slimming, smooth jawline definition, photorealistic, identical skin texture, exact skin tone, zero texturing artifacts, same lighting",
@@ -409,27 +417,27 @@ const NOSE_TECHNIQUES = {
   straight_slim: {
     name: "Straight & Slim Refinement",
     prompt_suffix: "straightened nasal dorsum, narrowed alar base, strictly preserve original nasal length, strictly preserve columella position, identical skin texture, photorealistic",
-    strength: 0.55,
+    strength: 0.72,
   },
   dorsal_hump: {
     name: "Dorsal Hump Reduction",
     prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
-    strength: 0.52,
+    strength: 0.70,
   },
   tip_plasty: {
     name: "Nasal Tip Refinement",
     prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
-    strength: 0.50,
+    strength: 0.68,
   },
   alar_reduction: {
     name: "Alar Base Narrowing",
     prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
-    strength: 0.42,
+    strength: 0.64,
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
     prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
-    strength: 0.40,
+    strength: 0.58,
   },
 };
 
@@ -449,44 +457,46 @@ const CHEEK_TECHNIQUES = {
 };
 
 // Volumetric cheek parameter matrix: dosage → inference strength, Gaussian blur radius, dilation.
+// Strengths raised so the mL selector produces a visibly different result at each step; they
+// now sit below the 0.78 cheek ceiling rather than all being clamped flat to 0.42.
 const CHEEK_DOSAGE_MAP: Record<
   string,
   { strength: number; blurRadius: number; dilationPx: number; promptLabel: string }
 > = {
-  "0.50ml": { strength: 0.35, blurRadius: 12, dilationPx: 8, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
-  "1.00ml": { strength: 0.45, blurRadius: 16, dilationPx: 12, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
-  "1.50ml": { strength: 0.55, blurRadius: 20, dilationPx: 16, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
+  "0.50ml": { strength: 0.58, blurRadius: 12, dilationPx: 8, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
+  "1.00ml": { strength: 0.68, blurRadius: 16, dilationPx: 12, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
+  "1.50ml": { strength: 0.78, blurRadius: 20, dilationPx: 16, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
 };
 
 const CHIN_TECHNIQUES = {
   anterior_projection: {
     name: "Anterior Projection (Mentoplasty)",
     prompt_suffix: `strong forward chin projection, prominent pogonion, well-defined chin tip, balanced facial profile line, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.65,
+    strength: 0.74,
     blurPx: 14,
   },
   chin_lengthening: {
     name: "Vertical Chin Elongation",
     prompt_suffix: `elongated lower facial third, vertically extended chin length, defined lower mentum border, sleek proportion, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.62,
+    strength: 0.72,
     blurPx: 14,
   },
   v_shape_slimming: {
     name: "V-Line Slimming / T-Osteotomy",
     prompt_suffix: `slim V-line chin tip, narrowed mental apex, delicate tapered lower jawline, sleek chin contour, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.65,
+    strength: 0.74,
     blurPx: 14,
   },
   square_jaw_chin: {
     name: "Broad Square Chin",
     prompt_suffix: `broad masculine square chin, strong angular mental width, wide chiseled chin border, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.65,
+    strength: 0.74,
     blurPx: 14,
   },
   cleft_smoothing: {
     name: "Chin Dimple / Cleft Smoothing",
     prompt_suffix: `smooth polished chin skin, completely filled chin dimple cleft, relaxed mentalis muscle, seamless chin contour, ${LOWER_FACE_PRESERVATION}`,
-    strength: 0.58,
+    strength: 0.66,
     blurPx: 12,
   },
 };
@@ -520,13 +530,13 @@ const LIP_TECHNIQUES = {
 type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip" | "jawline";
 
 const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
-  "0.25ml": { strength: 0.42, dilationPx: 6 },
-  "0.50ml": { strength: 0.52, dilationPx: 10 },
-  "0.75ml": { strength: 0.62, dilationPx: 14 },
-  "1.00ml": { strength: 0.72, dilationPx: 18 },
-  "tint_soft": { strength: 0.58, dilationPx: 10 },
-  "tint_medium": { strength: 0.68, dilationPx: 16 },
-  "tint_bold": { strength: 0.78, dilationPx: 22 },
+  "0.25ml": { strength: 0.48, dilationPx: 6 },
+  "0.50ml": { strength: 0.58, dilationPx: 10 },
+  "0.75ml": { strength: 0.66, dilationPx: 14 },
+  "1.00ml": { strength: 0.74, dilationPx: 18 },
+  "tint_soft": { strength: 0.60, dilationPx: 10 },
+  "tint_medium": { strength: 0.70, dilationPx: 16 },
+  "tint_bold": { strength: 0.80, dilationPx: 22 },
 };
 
 const BROW_THICKNESS_MAP: Record<string, { stroke: number; padding: number }> = {
@@ -534,6 +544,20 @@ const BROW_THICKNESS_MAP: Record<string, { stroke: number; padding: number }> = 
   medium: { stroke: 6, padding: 18 },
   thick: { stroke: 12, padding: 24 },
 };
+
+// Resolve the single global `strength` sent to fal.
+//
+// Previously this array was seeded with a hardcoded 0.52. Because every ceiling sat below
+// that value, Math.max(...) always exceeded the ceiling and the clamp always won — so the
+// strength sent was ALWAYS exactly the lowest ceiling, and the mL selectors had no effect
+// whatsoever on the result. The seed is gone; the requested value now comes only from the
+// procedures actually selected, so dosage genuinely drives intensity.
+function resolveStrength(requested: number[], ceilings: number[]): number {
+  if (requested.length === 0) return DEFAULT_STRENGTH;
+  const peak = Math.max(...requested);
+  if (ceilings.length === 0) return peak;
+  return Math.min(peak, Math.min(...ceilings));
+}
 
 export default function VisualizerApp() {
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
@@ -551,6 +575,8 @@ export default function VisualizerApp() {
 
   // Layout and view modes
   const [viewMode, setViewMode] = useState<"split" | "before" | "after">("split");
+  // Diagnostic: swap the BEFORE panel for the mask actually sent to the model.
+  const [showMask, setShowMask] = useState<boolean>(false);
 
   const [landmarker, setLandmarker] = useState<FaceLandmarker | null>(null);
   const [rawPixelLandmarks, setRawPixelLandmarks] = useState<Array<{ x: number; y: number }> | null>(null);
@@ -720,7 +746,7 @@ export default function VisualizerApp() {
     reader.readAsDataURL(file);
   };
 
-  // MASK COMPOSITING EFFECT — solid filled volumes with soft Gaussian falloff (no hard strokes).
+  // MASK COMPOSITING EFFECT — solid opaque cores with soft Gaussian haloes.
   useEffect(() => {
     if (!mappedLandmarks || !croppedImageSrc || !canvasRef.current) return;
     const img = new Image();
@@ -763,46 +789,42 @@ export default function VisualizerApp() {
         ctx.fill();
       };
 
-      const fillLandmarkPoly = (
+      // DUAL-PASS MASKING.
+      //
+      // A single blurred fill spreads the shape's alpha outward, so a narrow region like the
+      // nasal dorsum or a cheek pad never reaches fully opaque white at its centre. An
+      // inpainting model reads mid-grey as "mostly keep the original pixels", which is part
+      // of why simulations came back looking untouched.
+      //
+      // Pass 1 lays down the blurred halo (soft seam into surrounding skin). Pass 2 then
+      // stamps the same polygon unblurred on top, guaranteeing a 100%-opaque core the model
+      // has unambiguous permission to redraw. Halo first, core second — order matters.
+      const fillSolidCorePolygon = (
         ctx: CanvasRenderingContext2D,
-        indices: number[],
-        inflatePx = 0
+        pts: Point[],
+        inflatePx: number,
+        blurPx: number
       ) => {
-        fillPolygonPoints(ctx, getLandmarkPoints(indices, mappedLandmarks), inflatePx);
-      };
-
-      // Linear alpha ramp: 1.0 at the core landmark locus → 0.0 at the outer boundary radius.
-      // Canvas interpolates radial stops linearly, so this is an exact linear falloff with no seam.
-      const fillRadialVolume = (
-        ctx: CanvasRenderingContext2D,
-        indices: number[],
-        expansionPx: number
-      ) => {
-        const pts = getLandmarkPoints(indices, mappedLandmarks);
         if (pts.length < 3) return;
 
-        const { centroid, maxRadius } = getLandmarkMetrics(pts);
-        const outerRadius = maxRadius + expansionPx;
-        if (outerRadius <= 0) return;
+        ctx.save();
+        ctx.filter = `blur(${Math.max(0, blurPx).toFixed(2)}px)`;
+        fillPolygonPoints(ctx, pts, inflatePx);
+        ctx.restore();
 
-        const gradient = ctx.createRadialGradient(
-          centroid.x,
-          centroid.y,
-          0,
-          centroid.x,
-          centroid.y,
-          outerRadius
-        );
-        // alpha(r) = 1 - r / outerRadius
-        for (let step = 0; step <= 8; step++) {
-          const t = step / 8;
-          gradient.addColorStop(t, `rgba(255,255,255,${(1 - t).toFixed(4)})`);
-        }
+        ctx.save();
+        ctx.filter = "none";
+        fillPolygonPoints(ctx, pts, Math.max(0, inflatePx - blurPx * 0.6));
+        ctx.restore();
+      };
 
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(centroid.x, centroid.y, outerRadius, 0, Math.PI * 2);
-        ctx.fill();
+      const fillSolidCoreLandmarks = (
+        ctx: CanvasRenderingContext2D,
+        indices: number[],
+        inflatePx: number,
+        blurPx: number
+      ) => {
+        fillSolidCorePolygon(ctx, getLandmarkPoints(indices, mappedLandmarks), inflatePx, blurPx);
       };
 
       // Bizygomatic width (outer temple landmarks) — the shared anatomical scale anchor
@@ -827,15 +849,18 @@ export default function VisualizerApp() {
           const rightBrow = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
           const thicknessConfig = BROW_THICKNESS_MAP[browThickness] || BROW_THICKNESS_MAP.medium;
           const dilationPx = Math.max(4, thicknessConfig.padding * 0.45);
-          // Gaussian falloff applied exclusively to the filled volumetric path.
-          layerCtx.filter = `blur(${(dilationPx * 1.5).toFixed(2)}px)`;
+          const browBlur = dilationPx * 1.5;
           [leftBrow, rightBrow].forEach((browIndices) => {
-            fillLandmarkPoly(layerCtx, browIndices, dilationPx);
+            fillSolidCoreLandmarks(layerCtx, browIndices, dilationPx, browBlur);
           });
         } else if (feat === "chin") {
           const chinConfig = CHIN_TECHNIQUES[chinTechnique];
-          layerCtx.filter = `blur(${chinConfig.blurPx}px)`;
-          fillLandmarkPoly(layerCtx, angleSortIndices(CHIN_LANDMARKS, mappedLandmarks), 8);
+          fillSolidCoreLandmarks(
+            layerCtx,
+            angleSortIndices(CHIN_LANDMARKS, mappedLandmarks),
+            8,
+            chinConfig.blurPx
+          );
         } else if (feat === "cheeks") {
           const leftCheekNode = mappedLandmarks[234];
           const rightCheekNode = mappedLandmarks[454];
@@ -843,16 +868,24 @@ export default function VisualizerApp() {
             ? Math.abs(rightCheekNode.x - leftCheekNode.x)
             : img.width * 0.45;
 
-          const cheekBlurRadius = facialWidth * 0.06;
-          layerCtx.filter = `blur(${cheekBlurRadius.toFixed(2)}px)`;
-          layerCtx.fillStyle = "white";
+          // Blur trimmed from 6% to 4% of facial width. At 6% the Gaussian was wide enough
+          // relative to the cheek pad that even the dual-pass core sat inside a heavy
+          // gradient; 4% still dissolves the seam without diluting the region.
+          const cheekBlurRadius = facialWidth * 0.04;
+          const dosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+          const dosageScale = dosageConfig.dilationPx / CHEEK_DOSAGE_MAP["1.00ml"].dilationPx;
 
           if (CHEEK_LANDMARKS.left && CHEEK_LANDMARKS.right) {
             [CHEEK_LANDMARKS.left, CHEEK_LANDMARKS.right].forEach((cheekIndicesRaw) => {
-              const validIndices = cheekIndicesRaw.filter(idx => mappedLandmarks[idx] !== undefined);
+              const validIndices = cheekIndicesRaw.filter((idx) => mappedLandmarks[idx] !== undefined);
               if (validIndices.length > 2) {
                 const sortedIndices = angleSortIndices(validIndices, mappedLandmarks);
-                fillLandmarkPoly(layerCtx, sortedIndices, cheekBlurRadius * 0.5);
+                fillSolidCoreLandmarks(
+                  layerCtx,
+                  sortedIndices,
+                  cheekBlurRadius * 0.5 * dosageScale,
+                  cheekBlurRadius
+                );
               }
             });
           }
@@ -877,13 +910,14 @@ export default function VisualizerApp() {
             leftAlar && rightAlar
               ? Math.abs(rightAlar.x - leftAlar.x)
               : (noseMetrics?.width ?? img.width * 0.18);
-          // Dilation and Gaussian padding are both 22% of measured inter-alar width, so the
-          // dorsal hump and tip are fully covered without spilling into adjacent zones.
+          // Dilation is 22% of measured inter-alar width. The Gaussian is now capped well
+          // below that: the previous max(20, padding) drove blur to ~40px on a large crop,
+          // which is wide enough to hollow out the dorsum's alpha entirely.
           const nosePaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
+          const noseBlurPx = Math.min(NOSE_BLUR_PX, nosePaddingPx * 0.6);
           layerCtx.save();
           clipToNasalBase(layerCtx, mappedLandmarks, layerCanvas.width, layerCanvas.height);
-          layerCtx.filter = `blur(${Math.max(NOSE_BLUR_PX, nosePaddingPx).toFixed(2)}px)`;
-          fillPolygonPoints(layerCtx, nosePts, nosePaddingPx);
+          fillSolidCorePolygon(layerCtx, nosePts, nosePaddingPx, noseBlurPx);
           layerCtx.restore();
         } else if (feat === "jawline") {
           // Facial width anchor (outer temple landmarks 234/454) instead of
@@ -912,7 +946,6 @@ export default function VisualizerApp() {
           if (drawBuccal) {
             // Sub-malar triangle, calibrated to 5.5% of bizygomatic width.
             const buccalPaddingPx = facialWidth * FACIAL_CALIBRATION_CONFIG.buccal.blurMultiplier;
-            layerCtx.filter = `blur(${buccalPaddingPx.toFixed(2)}px)`;
             const midlineX = computeFacialMidlineX(mappedLandmarks);
             (
               [
@@ -930,7 +963,12 @@ export default function VisualizerApp() {
                 layerCanvas.width,
                 layerCanvas.height
               );
-              fillLandmarkPoly(layerCtx, buccalIndices, buccalPaddingPx * 0.4);
+              fillSolidCoreLandmarks(
+                layerCtx,
+                buccalIndices,
+                buccalPaddingPx * 0.4,
+                buccalPaddingPx * 0.7
+              );
               layerCtx.restore();
             });
           }
@@ -946,19 +984,31 @@ export default function VisualizerApp() {
               .filter((pt): pt is { x: number; y: number } => Boolean(pt));
             if (jawPts.length > 1) {
               const strokeWidthPx = facialWidth * 0.15;
-              // Soft mandibular angle blending, calibrated to 7% of bizygomatic width.
               const strokeBlurPx = facialWidth * FACIAL_CALIBRATION_CONFIG.jawline.blurMultiplier;
+
+              const strokeJawPath = (widthPx: number) => {
+                layerCtx.beginPath();
+                jawPts.forEach((pt, i) => {
+                  if (i === 0) layerCtx.moveTo(pt.x, pt.y);
+                  else layerCtx.lineTo(pt.x, pt.y);
+                });
+                layerCtx.lineWidth = widthPx;
+                layerCtx.strokeStyle = "white";
+                layerCtx.lineJoin = "round";
+                layerCtx.lineCap = "round";
+                layerCtx.stroke();
+              };
+
+              // Halo, then opaque core — same dual-pass rationale as the filled regions.
+              layerCtx.save();
               layerCtx.filter = `blur(${strokeBlurPx.toFixed(2)}px)`;
-              layerCtx.beginPath();
-              jawPts.forEach((pt, i) => {
-                if (i === 0) layerCtx.moveTo(pt.x, pt.y);
-                else layerCtx.lineTo(pt.x, pt.y);
-              });
-              layerCtx.lineWidth = strokeWidthPx;
-              layerCtx.strokeStyle = "white";
-              layerCtx.lineJoin = "round";
-              layerCtx.lineCap = "round";
-              layerCtx.stroke();
+              strokeJawPath(strokeWidthPx);
+              layerCtx.restore();
+
+              layerCtx.save();
+              layerCtx.filter = "none";
+              strokeJawPath(strokeWidthPx * 0.55);
+              layerCtx.restore();
             }
           }
 
@@ -977,17 +1027,15 @@ export default function VisualizerApp() {
             const dosageConfig = DOSAGE_MAP[lipDosage] || DOSAGE_MAP["0.50ml"];
             const dosageScale = dosageConfig.dilationPx / DOSAGE_MAP["0.50ml"].dilationPx;
             const lipBlur = lipWidth * LIP_BLUR_RATIO;
-            layerCtx.filter = `blur(${lipBlur.toFixed(2)}px)`;
             // Solid outer lip volume only — no inner oral cutouts or stroke outlines.
             // Natural landmark order is kept: the lip loops are already simple polygons and
             // angle-sorting them around the centroid would flatten the cupid's bow.
-            fillLandmarkPoly(layerCtx, indices, lipBlur * 0.3 * dosageScale);
+            fillSolidCoreLandmarks(layerCtx, indices, lipBlur * 0.3 * dosageScale, lipBlur);
           }
         } else {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
-            layerCtx.filter = "blur(9px)";
-            fillLandmarkPoly(layerCtx, indices, 6);
+            fillSolidCoreLandmarks(layerCtx, indices, 6, 9);
           }
         }
 
@@ -1041,7 +1089,11 @@ export default function VisualizerApp() {
         softMatte.height = height;
         const softCtx = softMatte.getContext("2d");
         if (!softCtx) return resolve(aiResultUrl);
-        softCtx.filter = "blur(12px)";
+        // Reduced from 12px. The mask already carries its own feathered halo, so a second
+        // wide blur here compounded on the first and bled the original photo back over the
+        // AI result — diluting exactly the change we were trying to see. 4px is just enough
+        // to soften the junction between the mask's opaque core and its halo.
+        softCtx.filter = "blur(4px)";
         softCtx.drawImage(matteCanvas, 0, 0);
 
         // AI clipped by soft matte, then layered over the original.
@@ -1128,6 +1180,59 @@ export default function VisualizerApp() {
   const USER_SIMULATION_TIMEOUT_ERROR =
     `Simulation timed out after ${SIMULATION_TIMEOUT_MS / 1000} seconds — please try again.`;
 
+  // Collect the requested strengths and ceilings for the current selection. Shared by the
+  // on-screen intensity readout and by the request itself, so what is displayed is exactly
+  // what is sent.
+  const buildStrengthInputs = useCallback(() => {
+    const requested: number[] = [];
+    const ceilings: number[] = [];
+
+    if (selectedFeatures.includes("chin")) {
+      requested.push(CHIN_TECHNIQUES[chinTechnique].strength);
+    }
+    if (selectedFeatures.includes("cheeks")) {
+      const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+      requested.push(cheekDosageConfig.strength);
+      ceilings.push(PROCEDURE_STRENGTH_MAP.cheeks);
+    }
+    if (selectedFeatures.includes("brows")) {
+      requested.push(DOSAGE_MAP[browDensity]?.strength || 0.70);
+    }
+    if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
+      requested.push(DOSAGE_MAP[lipDosage]?.strength ?? 0.58);
+      if (selectedFeatures.includes("upper_lip")) ceilings.push(PROCEDURE_STRENGTH_MAP.upper_lip);
+      if (selectedFeatures.includes("lower_lip")) ceilings.push(PROCEDURE_STRENGTH_MAP.lower_lip);
+    }
+    if (selectedFeatures.includes("nose")) {
+      requested.push(NOSE_TECHNIQUES[noseTechnique].strength);
+    }
+    if (selectedFeatures.includes("jawline")) {
+      const calibrations =
+        JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+      const lowerFaceCeiling = Math.max(
+        ...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength)
+      );
+      requested.push(lowerFaceCeiling);
+      ceilings.push(lowerFaceCeiling);
+    }
+
+    return { requested, ceilings };
+  }, [
+    selectedFeatures,
+    chinTechnique,
+    cheekDosage,
+    browDensity,
+    lipDosage,
+    noseTechnique,
+    jawlineTechnique,
+  ]);
+
+  // Live readout so the effect of each dosage/preset change is visible before running.
+  const previewStrength = useMemo(() => {
+    const { requested, ceilings } = buildStrengthInputs();
+    return resolveStrength(requested, ceilings);
+  }, [buildStrengthInputs]);
+
   const handleGeneratePreview = async () => {
     // A second click while a request is in flight would race the first and leave
     // the button state owned by whichever promise settles last.
@@ -1166,62 +1271,42 @@ export default function VisualizerApp() {
 
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
-      // Each procedure requests a strength; texture-sensitive ones also register a ceiling.
-      // strength is a single global parameter, so the requested maximum is resolved first and
-      // then clamped by the *lowest* active ceiling — the most fragile selected tissue governs.
-      const requestedStrengths: number[] = [0.52];
-      const strengthCeilings: number[] = [];
 
       if (selectedFeatures.includes("chin")) {
-        const chinConfig = CHIN_TECHNIQUES[chinTechnique];
-        promptParts.push(chinConfig.prompt_suffix);
-        requestedStrengths.push(chinConfig.strength);
+        promptParts.push(CHIN_TECHNIQUES[chinTechnique].prompt_suffix);
       }
       if (selectedFeatures.includes("cheeks")) {
         const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
         const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
         promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
-        requestedStrengths.push(cheekDosageConfig.strength);
-        strengthCeilings.push(PROCEDURE_STRENGTH_MAP.cheeks);
       }
       if (selectedFeatures.includes("brows")) {
         promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
-        requestedStrengths.push(DOSAGE_MAP[browDensity]?.strength || 0.62);
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
-        requestedStrengths.push(DOSAGE_MAP[lipDosage]?.strength ?? 0.5);
-        // Vermilion tissue washes out fastest, so the lip ceilings are the lowest.
-        if (selectedFeatures.includes("upper_lip")) {
-          strengthCeilings.push(PROCEDURE_STRENGTH_MAP.upper_lip);
-        }
-        if (selectedFeatures.includes("lower_lip")) {
-          strengthCeilings.push(PROCEDURE_STRENGTH_MAP.lower_lip);
-        }
       }
       if (selectedFeatures.includes("nose")) {
-        const noseConfig = NOSE_TECHNIQUES[noseTechnique];
-        promptParts.push(noseConfig.prompt_suffix);
+        promptParts.push(NOSE_TECHNIQUES[noseTechnique].prompt_suffix);
         promptParts.push(
           "reshape the full nasal unit including bridge, dorsum, sidewalls, and tip with smooth continuous contours"
         );
-        requestedStrengths.push(noseConfig.strength);
       }
       if (selectedFeatures.includes("jawline")) {
         const calibrations =
           JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
         calibrations.forEach((key) => promptParts.push(FACIAL_CALIBRATION_CONFIG[key].prompt));
-        const lowerFaceCeiling = Math.max(
-          ...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength)
-        );
-        requestedStrengths.push(lowerFaceCeiling);
-        strengthCeilings.push(lowerFaceCeiling);
       }
 
-      const maxStrength =
-        strengthCeilings.length > 0
-          ? Math.min(Math.max(...requestedStrengths), Math.min(...strengthCeilings))
-          : Math.max(...requestedStrengths);
+      // Single global strength, resolved identically to the on-screen readout.
+      const { requested, ceilings } = buildStrengthInputs();
+      const maxStrength = resolveStrength(requested, ceilings);
+      console.info("Simulation strength resolved:", {
+        requested,
+        ceilings,
+        sent: maxStrength,
+        features: selectedFeatures,
+      });
 
       const compositePrompt = promptParts.join(" ");
 
@@ -1546,7 +1631,24 @@ export default function VisualizerApp() {
         </div>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end items-center gap-3">
+        {/* Live intensity readout — this is the exact `strength` value sent to the model. */}
+        <span className="text-xs text-gray-400 font-mono">
+          Inference intensity:{" "}
+          <strong className="text-amber-300">{previewStrength.toFixed(2)}</strong>
+        </span>
+        {maskDataUrl && (
+          <button
+            onClick={() => setShowMask(!showMask)}
+            className={`text-xs font-semibold px-3 py-2 rounded border transition ${
+              showMask
+                ? "bg-amber-500 text-black border-amber-400"
+                : "bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700"
+            }`}
+          >
+            {showMask ? "🖼 Show Photo" : "🎭 Show Mask"}
+          </button>
+        )}
         <button
           onClick={handleGeneratePreview}
           disabled={!mappedLandmarks || loading || selectedFeatures.length === 0}
@@ -1575,14 +1677,28 @@ export default function VisualizerApp() {
             )}
           </div>
 
+          {showMask && (
+            <div className="mb-3 p-3 bg-amber-950/40 border border-amber-600/40 rounded-lg text-amber-100 text-xs">
+              <strong>Mask view:</strong> white areas are what the AI is allowed to change; black
+              areas are locked to the original photo. Solid white over the target region means the
+              mask is working. Faint grey means the change will be weak.
+            </div>
+          )}
+
           <div className={`grid gap-4 ${viewMode === "split" ? "grid-cols-2" : "grid-cols-1"}`}>
             
             {/* BEFORE COLUMN */}
             {(viewMode === "split" || viewMode === "before") && (
               <div className="relative rounded-lg overflow-hidden bg-black group flex items-center justify-center min-h-[450px] border border-gray-800">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={croppedImageSrc} alt="Before" className="w-full h-auto max-h-[85vh] object-contain" />
-                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded font-mono shadow-md">BEFORE</span>
+                <img
+                  src={showMask && maskDataUrl ? maskDataUrl : croppedImageSrc}
+                  alt={showMask ? "Mask" : "Before"}
+                  className="w-full h-auto max-h-[85vh] object-contain"
+                />
+                <span className="absolute bottom-3 left-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded font-mono shadow-md">
+                  {showMask ? "MASK" : "BEFORE"}
+                </span>
                 <button
                   onClick={() => setViewMode(viewMode === "split" ? "before" : "split")}
                   className="absolute top-3 right-3 bg-gray-900/80 hover:bg-amber-500 hover:text-black text-gray-300 text-xs font-semibold px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 shadow-lg"
