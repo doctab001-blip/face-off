@@ -314,7 +314,10 @@ const PROCEDURE_STRENGTH_MAP: Record<string, number> = {
 
 // Upper bound on a single inpainting round-trip. Past this the request is aborted
 // rather than left polling, so the UI can never deadlock on a hung queue.
-const SIMULATION_TIMEOUT_MS = 30000;
+// 90s rather than 30s: FLUX inpainting usually returns in 10-15s, but a fal cold start or a
+// busy queue pushes a heavy multi-procedure run past 30s, and the abort was killing renders
+// that would have succeeded.
+const SIMULATION_TIMEOUT_MS = 90000;
 
 // The crop and its mask travel to fal as base64 data URIs inside one JSON body, and
 // base64 inflates bytes by ~33%. A native-resolution phone crop blows past the 4.5 MB
@@ -1091,8 +1094,9 @@ export default function VisualizerApp() {
   const USER_SIMULATION_ERROR =
     "Simulation failed — please try again. Check console for details.";
 
+  // Derived from the constant so the copy cannot drift out of sync with the actual limit.
   const USER_SIMULATION_TIMEOUT_ERROR =
-    "Simulation timed out after 30 seconds — please try again.";
+    `Simulation timed out after ${SIMULATION_TIMEOUT_MS / 1000} seconds — please try again.`;
 
   const handleGeneratePreview = async () => {
     // A second click while a request is in flight would race the first and leave
