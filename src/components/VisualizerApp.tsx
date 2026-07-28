@@ -1149,17 +1149,15 @@ export default function VisualizerApp() {
       }
       const scopedNegativePrompt = activeNegatives.join(", ");
 
-      // flux-general/inpainting supports strength, negative_prompt, and
-      // enable_safety_checker; flux-pro/v1/fill does not. Uses the unwarped
-      // crop so image_url and mask_url share identical pixel coordinates.
-      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
+      // flux-pro/v1/fill accepts only prompt, image_url, and mask_url of the fields
+      // this app computes; negative_prompt and strength are not in its schema, so
+      // scopedNegativePrompt and maxStrength are computed but not sent. Uses the
+      // unwarped crop so image_url and mask_url share identical pixel coordinates.
+      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
         input: {
           prompt: compositePrompt,
-          negative_prompt: scopedNegativePrompt,
           image_url: croppedImageSrc,
           mask_url: maskDataUrl,
-          strength: maxStrength,
-          enable_safety_checker: true,
         },
         abortSignal: abortController.signal,
       });
