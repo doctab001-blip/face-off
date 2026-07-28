@@ -1016,14 +1016,21 @@ export default function VisualizerApp() {
     "Simulation failed — please try again. Check console for details.";
 
   const handleGeneratePreview = async () => {
-    if (!croppedImageSrc || !maskDataUrl) {
+    // A second click while a request is in flight would race the first and leave
+    // the button state owned by whichever promise settles last.
+    if (loading) return;
+
+    if (!croppedImageSrc || !maskDataUrl || selectedFeatures.length === 0) {
       const msg = !croppedImageSrc
         ? "Please upload a portrait before running the simulation."
-        : "Mask is still preparing — please wait a moment and try again.";
+        : selectedFeatures.length === 0
+          ? "Select at least one procedure before running the simulation."
+          : "Mask is still preparing — please wait a moment and try again.";
       console.error("handleGeneratePreview early exit:", {
         reason: msg,
         hasCroppedImage: Boolean(croppedImageSrc),
         hasMask: Boolean(maskDataUrl),
+        featureCount: selectedFeatures.length,
       });
       setErrorMessage(msg);
       return;
@@ -1398,7 +1405,7 @@ export default function VisualizerApp() {
       <div className="flex justify-end">
         <button
           onClick={handleGeneratePreview}
-          disabled={!mappedLandmarks || loading}
+          disabled={!mappedLandmarks || loading || selectedFeatures.length === 0}
           className="bg-amber-600 hover:bg-amber-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium py-3 px-8 rounded-md transition text-sm shadow-md"
         >
           {loading ? "Simulating Procedure..." : `Run (${selectedFeatures.length} Procedures) Simulation`}
