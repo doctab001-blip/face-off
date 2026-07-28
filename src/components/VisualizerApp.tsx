@@ -38,6 +38,39 @@ const NOSE_TIP = 1;
 
 type Point = { x: number; y: number };
 
+// Bilateral pairs taken from NOSE_LANDMARKS. Each is an exact mirror pair in MediaPipe's
+// canonical_face_model.obj (x_left === -x_right), so the midpoint of any one of them lies on
+// the nasal midline.
+const NOSE_SYMMETRY_PAIRS: Array<[number, number]> = [
+  [98, 327],
+  [45, 275],
+  [220, 440],
+  [129, 358],
+  [209, 429],
+  [122, 351],
+  [131, 360],
+];
+
+// Symmetry axis for the nasal mask specifically.
+//
+// The inner canthi sit ~3.7 units behind the nasal tip in the canonical model, and a deeper
+// point shifts less under perspective than a shallower one. So on a yawed head the canthi
+// midpoint no longer projects onto the nose's apparent center: at 8 degrees of yaw it lands
+// ~29px off on a 900px-wide face, which reads as a nose mask that is visibly off-center.
+// Averaging the nose's own mirror pairs keeps the axis at nasal depth and cuts that drift to
+// ~6px. Falls back to the facial midline when the nasal points are unavailable.
+function computeNasalMidlineX(points: Array<Point | undefined | null>): number | null {
+  const midpoints: number[] = [];
+  NOSE_SYMMETRY_PAIRS.forEach(([leftIdx, rightIdx]) => {
+    const left = points[leftIdx];
+    const right = points[rightIdx];
+    if (left && right) midpoints.push((left.x + right.x) / 2);
+  });
+
+  if (midpoints.length === 0) return computeFacialMidlineX(points);
+  return midpoints.reduce((sum, x) => sum + x, 0) / midpoints.length;
+}
+
 // True facial midline (X_mid). The inner canthi are the most stable bilateral pair for
 // this axis; the bridge root and tip serve as single-point fallbacks.
 function computeFacialMidlineX(points: Array<Point | undefined | null>): number | null {
@@ -788,7 +821,7 @@ export default function VisualizerApp() {
         } else if (feat === "nose") {
           const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
           const rawNosePts = getLandmarkPoints(noseIndices, mappedLandmarks);
-          const midlineX = computeFacialMidlineX(mappedLandmarks);
+          const midlineX = computeNasalMidlineX(mappedLandmarks);
           // Mirror every landmark about X_mid so the mask cannot inherit lateral mesh drift,
           // then widen horizontally about the same axis to span dorsum + both sidewalls.
           const nosePts =
