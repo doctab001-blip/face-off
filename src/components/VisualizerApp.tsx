@@ -296,18 +296,9 @@ function clipLateralToNasolabialFold(
   ctx.clip();
 }
 
-// Malar eminence — the cheekbone itself, bounded by the infraorbital rim above and the
-// sub-malar hollow below.
-//
-// The previous list sat too low: its centroid was y = -1.56 in canonical_face_model.obj
-// against a malar band of -0.98 to 2.66, only 4 of 9 points fell inside that band, and
-// 147/213/192 reached down to y = -4.03, level with the mouth corner. It masked the
-// sub-malar hollow rather than the arch, so a "zygomatic sculpting" prompt had no
-// cheekbone to work on. This set carries a centroid of y = -0.22 with 7 of 9 points in
-// the band, is bilaterally mirrored, and has no duplicate indices.
 const CHEEK_LANDMARKS = {
-  left: [117, 116, 123, 187, 205, 36, 142, 100, 118],
-  right: [346, 345, 352, 411, 425, 266, 371, 329, 347],
+  left: [116, 123, 147, 213, 192, 137, 123, 50, 205, 187],
+  right: [345, 352, 376, 433, 416, 366, 352, 280, 425, 411],
 };
 
 // Central mental shield — the sub-labial midline (18) and chin apex (152) joined by four
@@ -343,7 +334,7 @@ const JAWLINE_LANDMARKS = [234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 
 // Calibrated denoise ceilings. Above these, FLUX flattens skin texture and smears
 // volumetric edges, so the dosage tables may raise strength only up to these values.
 const PROCEDURE_STRENGTH_MAP: Record<string, number> = {
-  // Cheeks are governed by CHEEK_DOSAGE_MAP rather than a flat ceiling — see the note there.
+  cheeks: 0.42, // Subdued volumetric projection to eliminate smudges
   upper_lip: 0.38, // Gentle vermilion border eversion without texture washout
   lower_lip: 0.38,
 };
@@ -445,44 +436,26 @@ const NOSE_TECHNIQUES = {
 const CHEEK_TECHNIQUES = {
   malar_volume: {
     name: "Zygomatic Arch Projection",
-    prompt_suffix: "pronounced zygomatic arch volumetric contouring, structural mid-face elevation, elevated high cheekbone apex, smooth transition to infraorbital rim, identical skin texture, photorealistic",
+    prompt_suffix: "defined dermal filler projection over the zygomatic process and arch prominence, elevated high cheekbone apex, smooth transition to infraorbital rim, photorealistic",
   },
   apple_volume: {
     name: "Anterior Zygomatic Body Fill",
-    prompt_suffix: "pronounced volumetric fill over the anterior zygomatic body, structural mid-face elevation, forward midface projection, identical skin texture, photorealistic",
+    prompt_suffix: "youthful dermal filler volume concentrated over anterior zygomatic body prominence, natural midface projection, seamless skin texture, photorealistic",
   },
   contour_sculpt: {
     name: "High Zygomatic Arch Sculpting",
-    prompt_suffix: "pronounced lateral zygomatic arch volumetric contouring, structural mid-face elevation, chiselled cheekbone definition, identical skin texture, photorealistic",
+    prompt_suffix: "chiseled lateral zygomatic arch highlight, elevated cheekbone structure, elegant midface contour, photorealistic",
   },
 };
 
-// Volumetric cheek parameter matrix: dosage → inference strength and Gaussian blur, the
-// latter as a fraction of measured bizygomatic width.
-//
-// Strength scales with dosage instead of being clamped to one conservative ceiling. Below
-// roughly 0.45 flux-general/inpainting behaves as a pass-through and preserves the base
-// image so faithfully that a structural prompt cannot move the silhouette, which is why a
-// 1.5 mL request rendered identically to no treatment at all.
+// Volumetric cheek parameter matrix: dosage → inference strength, Gaussian blur radius, dilation.
 const CHEEK_DOSAGE_MAP: Record<
   string,
-  { strength: number; blurMultiplier: number; promptLabel: string }
+  { strength: number; blurRadius: number; dilationPx: number; promptLabel: string }
 > = {
-  "0.50ml": {
-    strength: 0.48,
-    blurMultiplier: 0.05,
-    promptLabel: "0.5ml dermal filler placement over the zygomatic prominence",
-  },
-  "1.00ml": {
-    strength: 0.55,
-    blurMultiplier: 0.065,
-    promptLabel: "1.0ml dermal filler augmentation centered on the zygomatic process and arch",
-  },
-  "1.50ml": {
-    strength: 0.62,
-    blurMultiplier: 0.085,
-    promptLabel: "pronounced 1.5ml volumetric cheek projection across the entire zygomatic structure",
-  },
+  "0.50ml": { strength: 0.35, blurRadius: 12, dilationPx: 8, promptLabel: "subtle 0.5ml filler highlight over zygomatic prominence" },
+  "1.00ml": { strength: 0.45, blurRadius: 16, dilationPx: 12, promptLabel: "moderate 1.0ml dermal filler augmentation centered on zygomatic process and arch" },
+  "1.50ml": { strength: 0.55, blurRadius: 20, dilationPx: 16, promptLabel: "pronounced 1.5ml volumetric cheek projection across entire zygomatic structure" },
 };
 
 const CHIN_TECHNIQUES = {
@@ -870,8 +843,7 @@ export default function VisualizerApp() {
             ? Math.abs(rightCheekNode.x - leftCheekNode.x)
             : img.width * 0.45;
 
-          const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-          const cheekBlurRadius = facialWidth * cheekDosageConfig.blurMultiplier;
+          const cheekBlurRadius = facialWidth * 0.06;
           layerCtx.filter = `blur(${cheekBlurRadius.toFixed(2)}px)`;
           layerCtx.fillStyle = "white";
 
@@ -880,10 +852,7 @@ export default function VisualizerApp() {
               const validIndices = cheekIndicesRaw.filter(idx => mappedLandmarks[idx] !== undefined);
               if (validIndices.length > 2) {
                 const sortedIndices = angleSortIndices(validIndices, mappedLandmarks);
-                // Dilation stays at a third of the blur: the mask top clears the lower lid by
-                // only ~31px on a 900px-wide face, and the old half-blur ratio would have put
-                // the solid core into the orbit once the 1.5ml blur widened.
-                fillLandmarkPoly(layerCtx, sortedIndices, cheekBlurRadius * 0.35);
+                fillLandmarkPoly(layerCtx, sortedIndices, cheekBlurRadius * 0.5);
               }
             });
           }
@@ -1212,10 +1181,8 @@ export default function VisualizerApp() {
         const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
         const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
         promptParts.push(`${cheekConfig.prompt_suffix}, ${cheekDosageConfig.promptLabel}`);
-        // No ceiling registered: the dosage table is itself the calibration now. A flat 0.42
-        // cap held every dosage below the threshold where the model will move structure, so
-        // 1.5ml and 0.5ml rendered identically.
         requestedStrengths.push(cheekDosageConfig.strength);
+        strengthCeilings.push(PROCEDURE_STRENGTH_MAP.cheeks);
       }
       if (selectedFeatures.includes("brows")) {
         promptParts.push(`${browThickness} thickness ${BROW_TECHNIQUES[browTechnique].prompt_suffix}`);
