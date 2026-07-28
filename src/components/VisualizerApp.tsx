@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
+import { describeSimulationFailure } from "@/lib/falErrors";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
@@ -273,6 +274,14 @@ const PROCEDURE_STRENGTH_MAP: Record<string, number> = {
 // Upper bound on a single inpainting round-trip. Past this the request is aborted
 // rather than left polling, so the UI can never deadlock on a hung queue.
 const SIMULATION_TIMEOUT_MS = 30000;
+
+// The crop and its mask travel to fal as base64 data URIs inside one JSON body, and
+// base64 inflates bytes by ~33%. A native-resolution phone crop blows past the 4.5 MB
+// serverless request limit and is rejected before it ever reaches the model, so the
+// crop is capped on its longest side. JPEG keeps the photo small; the mask stays PNG
+// because its soft falloff must survive without compression artifacts.
+const MAX_SIMULATION_DIMENSION = 1536;
+const CROP_JPEG_QUALITY = 0.92;
 
 // Cheek gradient as a fraction of measured bizygomatic width.
 const CHEEK_BLUR_RATIO = 0.05;
@@ -573,20 +582,31 @@ export default function VisualizerApp() {
     cropW = Math.min(cropW, maxCropW);
     cropH = Math.min(cropH, maxCropH);
 
+    // Render the crop no larger than the transport ceiling, still on a 64px grid.
+    const downscale = Math.min(1, MAX_SIMULATION_DIMENSION / Math.max(cropW, cropH));
+    const outW = Math.max(64, Math.round((cropW * downscale) / 64) * 64);
+    const outH = Math.max(64, Math.round((cropH * downscale) / 64) * 64);
+
+    // Landmarks are scaled by the exact source-to-canvas ratio (not by `downscale`,
+    // which the 64px rounding above perturbs) so the mask stays pixel-aligned.
+    const scaleX = outW / cropW;
+    const scaleY = outH / cropH;
+
     const mapped = pixelLms.map((pt) => ({
-      x: pt.x - cropX,
-      y: pt.y - cropY,
+      x: (pt.x - cropX) * scaleX,
+      y: (pt.y - cropY) * scaleY,
     }));
 
     setMappedLandmarks(mapped);
 
     const cropCanvas = document.createElement("canvas");
-    cropCanvas.width = cropW;
-    cropCanvas.height = cropH;
+    cropCanvas.width = outW;
+    cropCanvas.height = outH;
     const cropCtx = cropCanvas.getContext("2d");
     if (cropCtx) {
-      cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-      setCroppedImageSrc(cropCanvas.toDataURL("image/png"));
+      cropCtx.imageSmoothingQuality = "high";
+      cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+      setCroppedImageSrc(cropCanvas.toDataURL("image/jpeg", CROP_JPEG_QUALITY));
     }
   }, []);
 
@@ -912,10 +932,7 @@ export default function VisualizerApp() {
       const maskImg = new Image();
       let loadedCount = 0;
 
-      const checkLoaded = () => {
-        loadedCount++;
-        if (loadedCount < 3) return;
-
+      const compose = () => {
         const width = origImg.width;
         const height = origImg.height;
         const canvas = document.createElement("canvas");
@@ -966,6 +983,20 @@ export default function VisualizerApp() {
         ctx.globalCompositeOperation = "source-over";
         ctx.drawImage(aiLayer, 0, 0);
         resolve(canvas.toDataURL("image/png"));
+      };
+
+      // Reading back pixels throws if fal's CDN response taints the canvas. Without a
+      // guard that throw escapes the image onload callback, the promise never settles
+      // and the caller waits forever, so any failure falls back to the raw AI frame.
+      const checkLoaded = () => {
+        loadedCount++;
+        if (loadedCount < 3) return;
+        try {
+          compose();
+        } catch (err) {
+          console.error("applyEdgeFeathering compositing failed:", err);
+          resolve(aiResultUrl);
+        }
       };
 
       origImg.crossOrigin = "anonymous";
@@ -1174,7 +1205,7 @@ export default function VisualizerApp() {
       }
     } catch (err: unknown) {
       logSimulationErrorDetails("Composite Simulation Execution Error:", err);
-      setErrorMessage(timedOut ? USER_SIMULATION_TIMEOUT_ERROR : USER_SIMULATION_ERROR);
+      setErrorMessage(timedOut ? USER_SIMULATION_TIMEOUT_ERROR : describeSimulationFailure(err));
     } finally {
       clearTimeout(timeoutId);
       setLoading(false);
