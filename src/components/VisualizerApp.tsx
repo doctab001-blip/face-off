@@ -29,6 +29,8 @@ const NOSE_HORIZONTAL_EXPANSION = 1.15;
 const NOSE_BLUR_PX = 20;
 const NOSE_ALAR_LEFT = 129;
 const NOSE_ALAR_RIGHT = 358;
+// Subnasale — where the columella meets the upper lip. The inferior limit of the nasal unit.
+const NOSE_SUBNASALE = 2;
 
 // Midline anchors: inner eye corners (primary), then nasal bridge root, then nasal tip.
 const EYE_INNER_LEFT = 133;
@@ -179,6 +181,31 @@ function buildMidlineSymmetricPolygon(pts: Point[], midlineX: number): Point[] {
   const correction = midlineX - boxCenterX;
 
   return symmetric.map((p) => ({ x: p.x + correction, y: p.y }));
+}
+
+// Truncate drawing at the nasal base, so no mask pixel lands on the philtrum.
+//
+// NOSE_LANDMARKS already includes 164, which sits below the subnasale, and the 22% dilation
+// carries the mask a further ~72px past it on a 900px-wide face — close enough to the
+// vermilion to cover the philtrum entirely. That spare canvas is what lets FLUX erase the
+// existing tip and redraw it higher, which reads as a shortened, rotated nose with septal
+// artifacts beneath it. The boundary is the lowest of the subnasale and the two alar bases,
+// so a flared ala is never clipped off.
+function clipToNasalBase(
+  ctx: CanvasRenderingContext2D,
+  points: Array<Point | undefined | null>,
+  width: number,
+  height: number,
+): void {
+  const anchors = [points[NOSE_SUBNASALE], points[NOSE_ALAR_LEFT], points[NOSE_ALAR_RIGHT]].filter(
+    (pt): pt is Point => Boolean(pt),
+  );
+  if (anchors.length === 0) return;
+
+  const baseY = Math.max(...anchors.map((pt) => pt.y));
+  ctx.beginPath();
+  ctx.rect(-width, -height, width * 3, baseY + height);
+  ctx.clip();
 }
 
 // Scale horizontal offsets about X_mid. Applied to an already-symmetric polygon this widens
@@ -390,7 +417,7 @@ const JAWLINE_TECHNIQUES: Record<
 const NOSE_TECHNIQUES = {
   straight_slim: {
     name: "Straight & Slim Refinement",
-    prompt_suffix: "flawless narrow straight nasal bridge, delicate supratip break, refined defined nasal tip cartilage, subtle alar narrowing, seamless skin texture, photorealistic, 8k resolution",
+    prompt_suffix: "straightened nasal dorsum, narrowed alar base, strictly preserve original nasal length, strictly preserve columella position, identical skin texture, photorealistic",
     strength: 0.55,
   },
   dorsal_hump: {
@@ -884,8 +911,11 @@ export default function VisualizerApp() {
           // Dilation and Gaussian padding are both 22% of measured inter-alar width, so the
           // dorsal hump and tip are fully covered without spilling into adjacent zones.
           const nosePaddingPx = alarWidth * NOSE_EXPANSION_RATIO;
+          layerCtx.save();
+          clipToNasalBase(layerCtx, mappedLandmarks, layerCanvas.width, layerCanvas.height);
           layerCtx.filter = `blur(${Math.max(NOSE_BLUR_PX, nosePaddingPx).toFixed(2)}px)`;
           fillPolygonPoints(layerCtx, nosePts, nosePaddingPx);
+          layerCtx.restore();
         } else if (feat === "jawline") {
           // Facial width anchor (outer temple landmarks 234/454) instead of
           // nose-derived alarWidth — the buccal hollow and jaw span a much
@@ -1237,6 +1267,18 @@ export default function VisualizerApp() {
           "heavy marionette lines",
           "unnatural cheek shadows",
           "sunken under-eyes"
+        );
+      }
+      if (selectedFeatures.includes("nose")) {
+        // Without explicit length constraints the model regresses to aesthetic averages,
+        // which bundle tip rotation and shortening into any rhinoplasty request.
+        activeNegatives.push(
+          "tip rotation",
+          "shortened nose",
+          "foreshortened tip",
+          "philtrum distortion",
+          "upturned nose",
+          "altered nasal length"
         );
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
