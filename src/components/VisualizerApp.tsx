@@ -1213,15 +1213,18 @@ export default function VisualizerApp() {
       }
       const scopedNegativePrompt = activeNegatives.join(", ");
 
-      // flux-pro/v1/fill accepts only prompt, image_url, and mask_url of the fields
-      // this app computes; negative_prompt and strength are not in its schema, so
-      // scopedNegativePrompt and maxStrength are computed but not sent. Uses the
+      // flux-general/inpainting rather than flux-pro/v1/fill: the latter's schema has no
+      // strength or negative_prompt, so every dosage selector and calibrated ceiling this
+      // app computes was being discarded and the model ran at its own default. Uses the
       // unwarped crop so image_url and mask_url share identical pixel coordinates.
-      const result = await fal.subscribe("fal-ai/flux-pro/v1/fill", {
+      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
         input: {
           prompt: compositePrompt,
+          negative_prompt: scopedNegativePrompt,
           image_url: croppedImageSrc,
           mask_url: maskDataUrl,
+          strength: maxStrength,
+          enable_safety_checker: true,
         },
         abortSignal: abortController.signal,
       });
