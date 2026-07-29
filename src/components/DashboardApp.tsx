@@ -2,6 +2,19 @@
 
 import React, { useState } from "react";
 import VisualizerApp from "@/components/VisualizerApp";
+import { SERVICE_CATEGORIES, PROCEDURE_CATALOG, type ServiceCategoryId } from "@/lib/types";
+
+const CATALOG_BY_ID = new Map(PROCEDURE_CATALOG.map((p) => [p.id, p]));
+
+function categoriesForProcedures(procedureIds: string[]): ServiceCategoryId[] {
+  return Array.from(
+    new Set(
+      procedureIds
+        .map((id) => CATALOG_BY_ID.get(id)?.category)
+        .filter((c): c is ServiceCategoryId => Boolean(c)),
+    ),
+  );
+}
 
 type SubscriptionTierId = "boutique" | "clinical_group" | "enterprise";
 type ActiveTab = "visualizer" | "pricing" | "register" | "facility_portal" | "admin_portal";
@@ -36,6 +49,7 @@ interface Facility {
   simulationsLimit: number;
   registeredDate: string;
   practitioners: Practitioner[];
+  selectedProcedureIds: string[];
 }
 
 const SUBSCRIPTION_TIERS: Record<SubscriptionTierId, SubscriptionTier> = {
@@ -104,14 +118,41 @@ export default function DashboardApp() {
     phone: "",
     address: "",
   });
+  const [expandedCategories, setExpandedCategories] = useState<ServiceCategoryId[]>([]);
+  const [selectedProcedureIds, setSelectedProcedureIds] = useState<string[]>([]);
   const [registrationSuccessMsg, setRegistrationSuccessMsg] = useState("");
+  const [registrationError, setRegistrationError] = useState("");
 
   const isDark = theme === "dark";
   const currentFacility = facilities.find((f) => f.id === activeFacilityId) ?? null;
 
+  const toggleCategoryExpansion = (categoryId: ServiceCategoryId) => {
+    setExpandedCategories((prev) => {
+      if (prev.includes(categoryId)) {
+        // Collapsing a category also clears anything selected under it.
+        setSelectedProcedureIds((ids) =>
+          ids.filter((id) => CATALOG_BY_ID.get(id)?.category !== categoryId),
+        );
+        return prev.filter((id) => id !== categoryId);
+      }
+      return [...prev, categoryId];
+    });
+  };
+
+  const toggleProcedure = (procedureId: string) => {
+    setSelectedProcedureIds((prev) =>
+      prev.includes(procedureId) ? prev.filter((id) => id !== procedureId) : [...prev, procedureId],
+    );
+  };
+
   const handleRegisterFacility = (e: React.FormEvent) => {
     e.preventDefault();
     if (!regForm.name || !regForm.email) return;
+    if (selectedProcedureIds.length === 0) {
+      setRegistrationError("Select at least one procedure the facility offers.");
+      return;
+    }
+    setRegistrationError("");
 
     const newFacId = `fac_${Date.now().toString().slice(-4)}`;
     const tier = SUBSCRIPTION_TIERS[selectedTierForRegister];
@@ -136,6 +177,7 @@ export default function DashboardApp() {
           role: "Facility Admin",
         },
       ],
+      selectedProcedureIds,
     };
 
     setFacilities((prev) => [newFacility, ...prev]);
@@ -149,6 +191,8 @@ export default function DashboardApp() {
       phone: "",
       address: "",
     });
+    setSelectedProcedureIds([]);
+    setExpandedCategories([]);
 
     setTimeout(() => {
       setRegistrationSuccessMsg("");
@@ -310,7 +354,7 @@ export default function DashboardApp() {
               </div>
             </div>
 
-            <VisualizerApp />
+            <VisualizerApp allowedProcedureIds={currentFacility?.selectedProcedureIds ?? null} />
           </div>
         )}
 
@@ -441,6 +485,110 @@ export default function DashboardApp() {
                         }`}
                       />
                     </label>
+                    <div className="md:col-span-2 space-y-3">
+                      <span className="text-slate-400 font-mono text-xs block">
+                        Build Your Bundle — check a category, then choose the specific procedures you&apos;re licensed to offer
+                      </span>
+                      <div className="space-y-3">
+                        {SERVICE_CATEGORIES.map((category) => {
+                          const expanded = expandedCategories.includes(category.id);
+                          const procedures = PROCEDURE_CATALOG.filter((p) => p.category === category.id);
+                          const selectedCount = procedures.filter((p) =>
+                            selectedProcedureIds.includes(p.id),
+                          ).length;
+                          return (
+                            <div
+                              key={category.id}
+                              className={`rounded-xl border transition ${
+                                expanded
+                                  ? "border-amber-500/50 bg-amber-500/5"
+                                  : isDark
+                                    ? "border-slate-700 bg-slate-950"
+                                    : "border-slate-300 bg-white"
+                              }`}
+                            >
+                              <label className="flex items-start gap-2.5 p-3 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={expanded}
+                                  onChange={() => toggleCategoryExpansion(category.id)}
+                                  className="mt-0.5 accent-amber-500"
+                                />
+                                <span className="flex-1">
+                                  <span className="flex items-center justify-between gap-2">
+                                    <span
+                                      className={`block text-xs font-semibold ${
+                                        isDark ? "text-slate-200" : "text-slate-800"
+                                      }`}
+                                    >
+                                      {category.shortLabel}
+                                    </span>
+                                    {selectedCount > 0 && (
+                                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                                        {selectedCount} selected
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="block text-[11px] font-mono text-slate-500 mt-0.5">
+                                    {category.description}
+                                  </span>
+                                </span>
+                              </label>
+
+                              {expanded && (
+                                <div className="px-3 pb-3 space-y-1.5">
+                                  {procedures.map((procedure) => {
+                                    const checked = selectedProcedureIds.includes(procedure.id);
+                                    return (
+                                      <label
+                                        key={procedure.id}
+                                        className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                                          checked
+                                            ? "border-amber-500/40 bg-amber-500/10"
+                                            : isDark
+                                              ? "border-slate-800 bg-slate-900/60 hover:border-slate-700"
+                                              : "border-slate-200 bg-slate-50 hover:border-slate-300"
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => toggleProcedure(procedure.id)}
+                                          className="mt-0.5 accent-amber-500"
+                                        />
+                                        <span className="flex-1">
+                                          <span className="flex items-center gap-2 flex-wrap">
+                                            <span
+                                              className={`block text-xs font-medium ${
+                                                isDark ? "text-slate-200" : "text-slate-800"
+                                              }`}
+                                            >
+                                              {procedure.label}
+                                            </span>
+                                            {!procedure.simulated && (
+                                              <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400 border border-slate-600">
+                                                Catalog only — simulation coming soon
+                                              </span>
+                                            )}
+                                          </span>
+                                          <span className="block text-[11px] font-mono text-slate-500 mt-0.5">
+                                            {procedure.description}
+                                          </span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {registrationError && (
+                        <p className="text-[11px] font-mono text-red-400">{registrationError}</p>
+                      )}
+                    </div>
+
                     <div className="md:col-span-2 flex justify-end pt-2">
                       <button
                         type="submit"
@@ -507,6 +655,44 @@ export default function DashboardApp() {
                       >
                         {SUBSCRIPTION_TIERS[fac.tierId].name}
                       </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {categoriesForProcedures(fac.selectedProcedureIds).map((catId) => {
+                        const category = SERVICE_CATEGORIES.find((c) => c.id === catId);
+                        if (!category) return null;
+                        return (
+                          <span
+                            key={catId}
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                              isDark
+                                ? "bg-slate-800 text-indigo-300 border-slate-700"
+                                : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                            }`}
+                          >
+                            {category.shortLabel}
+                          </span>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 mb-4">
+                      {fac.selectedProcedureIds.map((procId) => {
+                        const procedure = CATALOG_BY_ID.get(procId);
+                        if (!procedure) return null;
+                        return (
+                          <span
+                            key={procId}
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                              isDark
+                                ? "bg-slate-900 text-slate-400 border-slate-800"
+                                : "bg-slate-50 text-slate-600 border-slate-200"
+                            }`}
+                          >
+                            {procedure.label}
+                          </span>
+                        );
+                      })}
                     </div>
 
                     <div
@@ -636,7 +822,11 @@ export default function DashboardApp() {
                       <span className="font-bold text-sm block">{fac.name}</span>
                       <span className="text-xs font-mono text-slate-400">
                         {fac.email} • {SUBSCRIPTION_TIERS[fac.tierId].name} • {fac.simulationsUsed}/
-                        {fac.simulationsLimit >= 99999 ? "∞" : fac.simulationsLimit} sims
+                        {fac.simulationsLimit >= 99999 ? "∞" : fac.simulationsLimit} sims •{" "}
+                        {categoriesForProcedures(fac.selectedProcedureIds)
+                          .map((catId) => SERVICE_CATEGORIES.find((c) => c.id === catId)?.shortLabel)
+                          .filter(Boolean)
+                          .join(", ")}
                       </span>
                     </div>
                     <button
