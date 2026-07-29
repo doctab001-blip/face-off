@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import VisualizerApp from "@/components/VisualizerApp";
 import { SERVICE_CATEGORIES, PROCEDURE_CATALOG, type ServiceCategoryId } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { getAllowedProcedureIds } from "@/lib/moduleAccess";
 
 const CATALOG_BY_ID = new Map(PROCEDURE_CATALOG.map((p) => [p.id, p]));
 
@@ -108,6 +110,44 @@ export default function DashboardApp() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [activeFacilityId, setActiveFacilityId] = useState<string | null>(null);
+  // Real Supabase-backed gating for the logged-in clinic, if any. null means "no
+  // authenticated clinic module data yet" and falls back to the local demo facility
+  // flow below, preserving today's guest/demo behavior.
+  const [liveAllowedProcedureIds, setLiveAllowedProcedureIds] = useState<string[] | null>(null);
+
+  useEffect(() => {
+      let cancelled = false;
+
+      async function loadClinicModuleAccess() {
+            if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+                    return;
+            }
+            try {
+                    const supabase = createClient();
+                    const {
+                              data: { user },
+                    } = await supabase.auth.getUser();
+                    if (!user || cancelled) return;
+
+                    const { data, error } = await supabase
+                      .from("clinic_module_access")
+                      .select("module_id")
+                      .eq("clinic_id", user.id);
+
+                    if (error || cancelled) return;
+
+                    const moduleIds = (data ?? []).map((row) => row.module_id as string);
+                    setLiveAllowedProcedureIds(getAllowedProcedureIds(moduleIds));
+            } catch (err) {
+                    console.error("Failed to load clinic module access:", err);
+            }
+      }
+
+      loadClinicModuleAccess();
+      return () => {
+            cancelled = true;
+      };
+  }, []);
   const [selectedTierForRegister, setSelectedTierForRegister] =
     useState<SubscriptionTierId>("clinical_group");
   const [regForm, setRegForm] = useState({
@@ -354,7 +394,7 @@ export default function DashboardApp() {
               </div>
             </div>
 
-            <VisualizerApp allowedProcedureIds={currentFacility?.selectedProcedureIds ?? null} />
+            <VisualizerApp allowedProcedureIds={liveAllowedProcedureIds ?? currentFacility?.selectedProcedureIds ?? null} />
           </div>
         )}
 
