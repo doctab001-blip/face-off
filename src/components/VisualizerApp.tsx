@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { fal } from "@fal-ai/client";
 import { describeSimulationFailure } from "@/lib/falErrors";
+import { PROCEDURE_CATALOG, type ServiceCategoryId } from "@/lib/types";
 
 fal.config({ proxyUrl: "/api/fal/proxy" });
 
@@ -19,6 +20,14 @@ const NOSE_LANDMARKS = [
   1, 2, 98, 327, 168, 197, 195, 5, 4, 275, 45, 220, 440, 6, 129, 358, 209, 429, 122, 351, 131, 360,
   164,
 ];
+
+// Upper-bridge/dorsum-only points from NOSE_LANDMARKS (nasion + bridge midline) — excluded
+// for tip/alar-only techniques so a "delicate" tip refinement isn't asking FLUX to also
+// redraw the untouched bridge.
+const NOSE_BRIDGE_ONLY_POINTS = [168, 197, 195, 6];
+const NOSE_TIP_ALAR_LANDMARKS = NOSE_LANDMARKS.filter(
+  (idx) => !NOSE_BRIDGE_ONLY_POINTS.includes(idx)
+);
 
 // Mask expansion and padding are anatomy-relative: 22% of the inter-alar (nostril base) width.
 const NOSE_EXPANSION_RATIO = 0.22;
@@ -37,6 +46,22 @@ const EYE_INNER_LEFT = 133;
 const EYE_INNER_RIGHT = 362;
 const NOSE_BRIDGE_ROOT = 168;
 const NOSE_TIP = 1;
+
+// Upper/lower lash-line contours for PMU eyeliner. These are MediaPipe's published canonical
+// face-mesh eye-contour indices — unlike NOSE_LANDMARKS/CHEEK_LANDMARKS above, they have not
+// been empirically re-verified against canonical_face_model.obj in this codebase, so expect a
+// visual tuning pass (thickness/blur) once real test renders come back, the same way nose and
+// chin needed iteration per git history.
+const UPPER_LASH_LINE = {
+  left: [246, 161, 160, 159, 158, 157, 173],
+  right: [466, 388, 387, 386, 385, 384, 398],
+};
+const LOWER_LASH_LINE = {
+  left: [33, 7, 163, 144, 145, 153, 154, 155],
+  right: [263, 249, 390, 373, 374, 380, 381, 382],
+};
+// Outer canthus per side — anchors the winged-eyeliner extension direction.
+const EYE_OUTER_CORNER = { left: 33, right: 263 };
 
 type Point = { x: number; y: number };
 
@@ -346,6 +371,13 @@ const PROCEDURE_STRENGTH_MAP: Record<string, number> = {
   lower_lip: 0.70,
 };
 
+// PMU lip work is a color/pigment tint, not a volume change — these ceilings sit well below
+// the volumetric lip-filler ceiling above so FLUX cannot reshape the lip while "tinting" it.
+const LIP_PMU_MAX_STRENGTH = 0.42;
+// Eyeliner is a thin pigment line, not a skin-reshaping region — kept low so the eyelid itself
+// is never redrawn, only the line along the lash margin.
+const EYELINER_MAX_STRENGTH = 0.5;
+
 // Upper bound on a single inpainting round-trip. Past this the request is aborted
 // rather than left polling, so the UI can never deadlock on a hung queue.
 // 90s rather than 30s: FLUX inpainting usually returns in 10-15s, but a fal cold start or a
@@ -394,22 +426,35 @@ type CalibrationKey = keyof typeof FACIAL_CALIBRATION_CONFIG;
 const LOWER_FACE_PRESERVATION =
   "subtle contouring only, exactly same skin texture, same skin tone, same lighting, no freckles, no texture change, zero perioral distortion, photorealistic";
 
-// Each preset selects which calibrated regions participate.
+// Each preset selects which calibrated regions participate. `category` tags which
+// service-line bundle unlocks the technique; `promptSuffix` layers extra wording on top of
+// the shared calibration prompt so techniques sharing a calibration (e.g. jawline_slim vs.
+// masseter_reduction, both ["jawline"]) don't read identically.
 const JAWLINE_TECHNIQUES: Record<
   string,
-  { name: string; calibrations: readonly CalibrationKey[] }
+  { name: string; calibrations: readonly CalibrationKey[]; category: ServiceCategoryId; promptSuffix?: string }
 > = {
   buccal_fat_removal: {
     name: "Buccal Fat Pad Removal",
     calibrations: ["buccal"],
+    category: "plastic_surgery",
   },
   jawline_slim: {
     name: "Jawline Slimming (V-Line)",
     calibrations: ["jawline"],
+    category: "injectables",
+  },
+  masseter_reduction: {
+    name: "Masseter Reduction (Botox)",
+    calibrations: ["jawline"],
+    category: "injectables",
+    promptSuffix:
+      "masseter muscle relaxation, subtle lower jaw slimming without surgical alteration, preserved bone structure",
   },
   combined_contour: {
     name: "Combined Lower Face Contour",
     calibrations: ["buccal", "jawline"],
+    category: "plastic_surgery",
   },
 };
 
@@ -418,26 +463,35 @@ const NOSE_TECHNIQUES = {
     name: "Straight & Slim Refinement",
     prompt_suffix: "straightened nasal dorsum, narrowed alar base, strictly preserve original nasal length, strictly preserve columella position, identical skin texture, photorealistic",
     strength: 0.72,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   dorsal_hump: {
     name: "Dorsal Hump Reduction",
     prompt_suffix: "perfectly straight smooth nasal profile, complete dorsal hump reduction, refined bridge, photorealistic",
     strength: 0.70,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   tip_plasty: {
     name: "Nasal Tip Refinement",
     prompt_suffix: "delicate narrow tip cartilage, elevated nasal tip angle, subtle supratip break, photorealistic",
-    strength: 0.68,
+    // Lowered from 0.68 alongside the tighter tip/alar-only mask (NOSE_TIP_ALAR_LANDMARKS) —
+    // a full-strength edit concentrated on a much smaller region reads as more aggressive,
+    // not less, so the mask and strength were tuned down together.
+    strength: 0.60,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   alar_reduction: {
     name: "Alar Base Narrowing",
     prompt_suffix: "narrowed alar base, reduced nostril flare, tight delicate nasal base, photorealistic",
-    strength: 0.64,
+    // Lowered from 0.64 alongside the tighter tip/alar-only mask, same rationale as tip_plasty.
+    strength: 0.58,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
     prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
     strength: 0.58,
+    category: "injectables" as ServiceCategoryId,
   },
 };
 
@@ -445,14 +499,17 @@ const CHEEK_TECHNIQUES = {
   malar_volume: {
     name: "Zygomatic Arch Projection",
     prompt_suffix: "defined dermal filler projection over the zygomatic process and arch prominence, elevated high cheekbone apex, smooth transition to infraorbital rim, photorealistic",
+    category: "injectables" as ServiceCategoryId,
   },
   apple_volume: {
     name: "Anterior Zygomatic Body Fill",
     prompt_suffix: "youthful dermal filler volume concentrated over anterior zygomatic body prominence, natural midface projection, seamless skin texture, photorealistic",
+    category: "injectables" as ServiceCategoryId,
   },
   contour_sculpt: {
     name: "High Zygomatic Arch Sculpting",
     prompt_suffix: "chiseled lateral zygomatic arch highlight, elevated cheekbone structure, elegant midface contour, photorealistic",
+    category: "injectables" as ServiceCategoryId,
   },
 };
 
@@ -474,30 +531,42 @@ const CHIN_TECHNIQUES = {
     prompt_suffix: `strong forward chin projection, prominent pogonion, well-defined chin tip, balanced facial profile line, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.74,
     blurPx: 14,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   chin_lengthening: {
     name: "Vertical Chin Elongation",
     prompt_suffix: `elongated lower facial third, vertically extended chin length, defined lower mentum border, sleek proportion, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.72,
     blurPx: 14,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   v_shape_slimming: {
     name: "V-Line Slimming / T-Osteotomy",
     prompt_suffix: `slim V-line chin tip, narrowed mental apex, delicate tapered lower jawline, sleek chin contour, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.74,
     blurPx: 14,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   square_jaw_chin: {
     name: "Broad Square Chin",
     prompt_suffix: `broad masculine square chin, strong angular mental width, wide chiseled chin border, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.74,
     blurPx: 14,
+    category: "plastic_surgery" as ServiceCategoryId,
   },
   cleft_smoothing: {
     name: "Chin Dimple / Cleft Smoothing",
     prompt_suffix: `smooth polished chin skin, completely filled chin dimple cleft, relaxed mentalis muscle, seamless chin contour, ${LOWER_FACE_PRESERVATION}`,
     strength: 0.66,
     blurPx: 12,
+    category: "plastic_surgery" as ServiceCategoryId,
+  },
+  chin_filler: {
+    name: "Chin Filler (Non-Surgical Projection)",
+    prompt_suffix: `subtle non-surgical dermal filler chin projection, soft natural mentum enhancement, no bone or implant alteration, ${LOWER_FACE_PRESERVATION}`,
+    strength: 0.62,
+    blurPx: 12,
+    category: "injectables" as ServiceCategoryId,
   },
 };
 
@@ -505,29 +574,96 @@ const BROW_TECHNIQUES = {
   ombre_powder: {
     name: "Ombré Powder Brows",
     prompt_suffix: "ombre powder brows, razor-sharp clean lower border, crisp top outline, freshly waxed smooth skin, zero stray hairs outside border, dermaplaned skin, permanent makeup pixel shading, flawless symmetrical shape, photorealistic",
+    category: "pmu" as ServiceCategoryId,
   },
   microblading: {
     name: "Microblading",
     prompt_suffix: "microblading eyebrows, ultra-sharp razor-crisp outer outline border, crisp individual 3D hair strokes inside clean stencil, pristine waxed skin perimeter, no stray hairs, photorealistic",
+    category: "pmu" as ServiceCategoryId,
   },
   hybrid_tint: {
-    name: "Hybrid Brow Tint",
+    name: "Combination Brows",
     prompt_suffix: "hybrid brow tinting, razor-sharp waxed outline edge, deep skin stain underneath, crisp defined arch tail, smooth hairless surrounding skin, high contrast, photorealistic",
+    category: "pmu" as ServiceCategoryId,
   },
 };
 
 const LIP_TECHNIQUES = {
   russian: {
     name: "Russian Lip Technique",
-    prompt_suffix: "Russian lip filler technique, vertical micro-threads, flat profile, heightened cupid's bow, plump volume, clean teeth, natural mouth opening, photorealistic",
+    prompt_suffix: "Russian lip filler technique, vertical lip tenting, philtrum-adjacent central projection, heightened cupid's bow, flat anterior profile, clean teeth, natural mouth opening, photorealistic",
+    category: "injectables" as ServiceCategoryId,
   },
   classic_lip: {
     name: "Classic Lip Linear",
     prompt_suffix: "Classic lip filler, anterior 3D projection, horizontal volume enhancement, plump natural pout, clean teeth, photorealistic",
+    category: "injectables" as ServiceCategoryId,
+  },
+  border_definition: {
+    name: "Cupid's Bow & Border Definition",
+    prompt_suffix: "precise vermilion border filler definition, sharpened cupid's bow peaks, crisp lip outline, natural volume, clean teeth, photorealistic",
+    category: "injectables" as ServiceCategoryId,
+  },
+  lip_flip: {
+    name: "Lip Flip",
+    prompt_suffix: "subtle lip flip, slight eversion of the upper lip vermilion border, no added volume, relaxed orbicularis oris, natural mouth opening, photorealistic",
+    category: "injectables" as ServiceCategoryId,
   },
 };
 
-type FeatureType = "chin" | "cheeks" | "nose" | "brows" | "upper_lip" | "lower_lip" | "jawline";
+// Russian technique gets a lower strength ceiling than the mL-dosage-driven default: its mask
+// is deliberately asymmetric (upper lip lifted toward the philtrum, lower lip narrowed), and a
+// smaller, more targeted mask needs less denoise headroom than the standard symmetric lip fill.
+const LIP_TECHNIQUE_STRENGTH_CEILING: Partial<Record<keyof typeof LIP_TECHNIQUES, number>> = {
+  russian: 0.55,
+};
+
+const LIP_PMU_TECHNIQUES = {
+  lip_blushing: {
+    name: "Lip Blushing",
+    prompt_suffix: "semi-permanent lip blush tattoo, sheer natural pigment tint evenly applied across the lip surface, enhanced natural lip color, symmetric tone, no volume change, exact original lip shape and size preserved, photorealistic",
+    category: "pmu" as ServiceCategoryId,
+  },
+  lip_neutralization: {
+    name: "Lip Neutralization",
+    prompt_suffix: "semi-permanent lip pigment correction, neutralized dark or cool-toned pigmentation, warmed natural rosy tone, even color across the lip surface, no volume change, exact original lip shape preserved, photorealistic",
+    category: "pmu" as ServiceCategoryId,
+  },
+  lip_liner: {
+    name: "Lip Liner",
+    prompt_suffix: "semi-permanent lip liner tattoo, crisp defined vermilion border line, subtle natural fill just inside the border, no volume change, exact original lip shape preserved, photorealistic",
+    category: "pmu" as ServiceCategoryId,
+  },
+};
+
+const EYELINER_TECHNIQUES = {
+  lash_enhancement: {
+    name: "Lash Enhancement",
+    prompt_suffix: "semi-permanent lash line enhancement, subtle soft pigment filling only between the lashes, barely-there natural definition, no visible line extension, eyelid shape and skin texture unchanged, photorealistic",
+    category: "pmu" as ServiceCategoryId,
+  },
+  classic: {
+    name: "Classic Eyeliner",
+    prompt_suffix: "semi-permanent classic eyeliner tattoo, thin crisp pigment line along the upper lash margin, natural eye shape and eyelid skin texture preserved, photorealistic",
+    category: "pmu" as ServiceCategoryId,
+  },
+  winged: {
+    name: "Winged Eyeliner",
+    prompt_suffix: "semi-permanent winged eyeliner tattoo, crisp upper lash line tapering into a subtle upward wing past the outer corner, natural eye shape and eyelid skin texture preserved, photorealistic",
+    category: "pmu" as ServiceCategoryId,
+  },
+};
+
+type FeatureType =
+  | "chin"
+  | "cheeks"
+  | "nose"
+  | "brows"
+  | "upper_lip"
+  | "lower_lip"
+  | "jawline"
+  | "lip_pmu"
+  | "eyeliner";
 
 const DOSAGE_MAP: Record<string, { strength: number; dilationPx: number }> = {
   "0.25ml": { strength: 0.48, dilationPx: 6 },
@@ -559,7 +695,14 @@ function resolveStrength(requested: number[], ceilings: number[]): number {
   return Math.min(peak, Math.min(...ceilings));
 }
 
-export default function VisualizerApp() {
+interface VisualizerAppProps {
+  // Specific PROCEDURE_CATALOG ids the active facility is licensed to offer.
+  // null/undefined (guest mode, or no facility system wired up) leaves every
+  // toggle and technique unrestricted — today's behavior.
+  allowedProcedureIds?: string[] | null;
+}
+
+export default function VisualizerApp({ allowedProcedureIds = null }: VisualizerAppProps = {}) {
   const [croppedImageSrc, setCroppedImageSrc] = useState<string | null>(null);
   const [selectedFeatures, setSelectedFeatures] = useState<FeatureType[]>(["cheeks"]);
   const [browTechnique, setBrowTechnique] = useState<keyof typeof BROW_TECHNIQUES>("ombre_powder");
@@ -572,6 +715,9 @@ export default function VisualizerApp() {
   const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
   const [jawlineTechnique, setJawlineTechnique] = useState<keyof typeof JAWLINE_TECHNIQUES>("combined_contour");
+  const [lipPmuTechnique, setLipPmuTechnique] = useState<keyof typeof LIP_PMU_TECHNIQUES>("lip_blushing");
+  const [lipPmuDensity] = useState<string>("tint_medium");
+  const [eyelinerTechnique, setEyelinerTechnique] = useState<keyof typeof EYELINER_TECHNIQUES>("classic");
 
   // Layout and view modes
   const [viewMode, setViewMode] = useState<"split" | "before" | "after">("split");
@@ -642,6 +788,147 @@ export default function VisualizerApp() {
       setSelectedFeatures([...selectedFeatures, feat]);
     }
   };
+
+  // Facility bundle gating. `unlockedSet` holds "feature:technique" keys the active facility
+  // is licensed for; null means unrestricted (guest mode / no facility system), preserving
+  // today's behavior of showing every toggle and technique.
+  const unlockedSet = useMemo(() => {
+    if (!allowedProcedureIds) return null;
+    const set = new Set<string>();
+    PROCEDURE_CATALOG.forEach((entry) => {
+      if (entry.feature && entry.technique && allowedProcedureIds.includes(entry.id)) {
+        set.add(`${entry.feature}:${entry.technique}`);
+      }
+    });
+    return set;
+  }, [allowedProcedureIds]);
+
+  // Lips share one technique/dosage selector across the upper_lip and lower_lip toggles (see
+  // LIP_TECHNIQUES usage below), so both toggles unlock off the same "upper_lip:*" catalog
+  // entries rather than needing a duplicate lower_lip-tagged catalog row.
+  const availableLipTechniques = useMemo(() => {
+    const keys = Object.keys(LIP_TECHNIQUES) as Array<keyof typeof LIP_TECHNIQUES>;
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`upper_lip:${key}`));
+  }, [unlockedSet]);
+
+  const availableChinTechniques = useMemo(() => {
+    const keys = Object.keys(CHIN_TECHNIQUES) as Array<keyof typeof CHIN_TECHNIQUES>;
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`chin:${key}`));
+  }, [unlockedSet]);
+
+  const availableCheekTechniques = useMemo(() => {
+    const keys = Object.keys(CHEEK_TECHNIQUES) as Array<keyof typeof CHEEK_TECHNIQUES>;
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`cheeks:${key}`));
+  }, [unlockedSet]);
+
+  const availableNoseTechniques = useMemo(() => {
+    const keys = Object.keys(NOSE_TECHNIQUES) as Array<keyof typeof NOSE_TECHNIQUES>;
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`nose:${key}`));
+  }, [unlockedSet]);
+
+  const availableBrowTechniques = useMemo(() => {
+    const keys = Object.keys(BROW_TECHNIQUES) as Array<keyof typeof BROW_TECHNIQUES>;
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`brows:${key}`));
+  }, [unlockedSet]);
+
+  const availableLipPmuTechniques = useMemo(() => {
+    const keys = Object.keys(LIP_PMU_TECHNIQUES) as Array<keyof typeof LIP_PMU_TECHNIQUES>;
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`lip_pmu:${key}`));
+  }, [unlockedSet]);
+
+  const availableEyelinerTechniques = useMemo(() => {
+    const keys = Object.keys(EYELINER_TECHNIQUES) as Array<keyof typeof EYELINER_TECHNIQUES>;
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`eyeliner:${key}`));
+  }, [unlockedSet]);
+
+  // Jawline splits into single-calibration techniques (gated normally) plus the
+  // combined_contour preset, which only makes sense once buccal_fat_removal AND at least
+  // one of jawline_slim/masseter_reduction are both unlocked.
+  const availableJawlineTechniques = useMemo((): Array<keyof typeof JAWLINE_TECHNIQUES> => {
+    const singleKeys = (
+      ["buccal_fat_removal", "jawline_slim", "masseter_reduction"] as const
+    ).filter((key) => !unlockedSet || unlockedSet.has(`jawline:${key}`));
+    const comboUnlocked =
+      !unlockedSet ||
+      (unlockedSet.has("jawline:buccal_fat_removal") &&
+        (unlockedSet.has("jawline:jawline_slim") || unlockedSet.has("jawline:masseter_reduction")));
+    const keys: Array<keyof typeof JAWLINE_TECHNIQUES> = [...singleKeys];
+    if (comboUnlocked) keys.push("combined_contour");
+    return keys;
+  }, [unlockedSet]);
+
+  // If the facility bundle changes underneath the current selection, drop any now-locked
+  // feature and fall back the current technique choice to the first still-unlocked option.
+  useEffect(() => {
+    setSelectedFeatures((prev) => {
+      const availability: Partial<Record<FeatureType, unknown[]>> = {
+        chin: availableChinTechniques,
+        cheeks: availableCheekTechniques,
+        nose: availableNoseTechniques,
+        jawline: availableJawlineTechniques,
+        brows: availableBrowTechniques,
+        upper_lip: availableLipTechniques,
+        lower_lip: availableLipTechniques,
+        lip_pmu: availableLipPmuTechniques,
+        eyeliner: availableEyelinerTechniques,
+      };
+      const next = prev.filter((f) => (availability[f]?.length ?? 0) > 0);
+      if (next.length > 0) return next;
+      // Nothing in the current selection survived gating (e.g. a facility switch removed
+      // every previously-selected feature) — fall back to the first feature that's actually
+      // unlocked, in the same order the toggle buttons are displayed, rather than silently
+      // keeping a now-locked feature selected with no visible way to deselect it.
+      const priorityOrder: FeatureType[] = [
+        "chin",
+        "cheeks",
+        "nose",
+        "jawline",
+        "brows",
+        "upper_lip",
+        "lower_lip",
+        "lip_pmu",
+        "eyeliner",
+      ];
+      const fallback = priorityOrder.find((f) => (availability[f]?.length ?? 0) > 0);
+      return fallback ? [fallback] : prev;
+    });
+
+    if (!availableChinTechniques.includes(chinTechnique)) {
+      setChinTechnique(availableChinTechniques[0] ?? chinTechnique);
+    }
+    if (!availableCheekTechniques.includes(cheekTechnique)) {
+      setCheekTechnique(availableCheekTechniques[0] ?? cheekTechnique);
+    }
+    if (!availableNoseTechniques.includes(noseTechnique)) {
+      setNoseTechnique(availableNoseTechniques[0] ?? noseTechnique);
+    }
+    if (!availableJawlineTechniques.includes(jawlineTechnique)) {
+      setJawlineTechnique(availableJawlineTechniques[0] ?? jawlineTechnique);
+    }
+    if (!availableBrowTechniques.includes(browTechnique)) {
+      setBrowTechnique(availableBrowTechniques[0] ?? browTechnique);
+    }
+    if (!availableLipTechniques.includes(lipTechnique)) {
+      setLipTechnique(availableLipTechniques[0] ?? lipTechnique);
+    }
+    if (!availableLipPmuTechniques.includes(lipPmuTechnique)) {
+      setLipPmuTechnique(availableLipPmuTechniques[0] ?? lipPmuTechnique);
+    }
+    if (!availableEyelinerTechniques.includes(eyelinerTechnique)) {
+      setEyelinerTechnique(availableEyelinerTechniques[0] ?? eyelinerTechnique);
+    }
+    // Only re-run this reconciliation when the unlocked set itself changes (facility switch),
+    // not on every technique pick — the technique setters above are the reconciliation, not
+    // triggers for it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlockedSet]);
 
   const updateViewportAndCrop = useCallback((img: HTMLImageElement, pixelLms: Array<{ x: number; y: number }>) => {
     const origW = img.width;
@@ -890,7 +1177,14 @@ export default function VisualizerApp() {
             });
           }
         } else if (feat === "nose") {
-          const noseIndices = angleSortIndices(NOSE_LANDMARKS, mappedLandmarks);
+          // Tip/alar-only techniques don't touch the bridge, so they get the smaller mask —
+          // asking FLUX to redraw the whole dorsum for a "delicate" tip refinement diluted
+          // the edit (or let the model reshape the untouched bridge instead).
+          const noseMaskLandmarks =
+            noseTechnique === "tip_plasty" || noseTechnique === "alar_reduction"
+              ? NOSE_TIP_ALAR_LANDMARKS
+              : NOSE_LANDMARKS;
+          const noseIndices = angleSortIndices(noseMaskLandmarks, mappedLandmarks);
           const rawNosePts = getLandmarkPoints(noseIndices, mappedLandmarks);
           const midlineX = computeNasalMidlineX(mappedLandmarks);
           // Mirror every landmark about X_mid so the mask cannot inherit lateral mesh drift,
@@ -1013,6 +1307,90 @@ export default function VisualizerApp() {
           }
 
           layerCtx.restore();
+        } else if (feat === "lip_pmu") {
+          // PMU lip pigment covers the whole lip (upper + lower together), unlike the
+          // volumetric filler toggles above which are selected independently per lip.
+          const leftCommissure = mappedLandmarks[COMMISSURE_LEFT];
+          const rightCommissure = mappedLandmarks[COMMISSURE_RIGHT];
+          const lipWidth =
+            leftCommissure && rightCommissure
+              ? Math.abs(rightCommissure.x - leftCommissure.x)
+              : facialWidthPx * 0.35;
+          const dosageConfig = DOSAGE_MAP[lipPmuDensity] || DOSAGE_MAP["tint_medium"];
+          const dosageScale = dosageConfig.dilationPx / DOSAGE_MAP["tint_medium"].dilationPx;
+          const lipBlur = lipWidth * LIP_BLUR_RATIO;
+          (["upper_lip", "lower_lip"] as const).forEach((lipFeat) => {
+            const indices = FEATURE_INDICES[lipFeat];
+            if (indices && indices.length > 0) {
+              fillSolidCoreLandmarks(layerCtx, indices, lipBlur * 0.3 * dosageScale, lipBlur);
+            }
+          });
+        } else if (feat === "eyeliner") {
+          // Thin open-stroke mask along the lash line — same dual-pass halo-then-core stroke
+          // technique used for the JAWLINE_LANDMARKS contour above, just applied per eye side.
+          const baseStrokeWidth = Math.max(2, facialWidthPx * 0.006);
+          const strokeBlurPx = Math.max(2, facialWidthPx * 0.012);
+
+          const buildLinePts = (indices: number[], extendWing: boolean, cornerIdx: number) => {
+            const pts = indices
+              .map((idx) => mappedLandmarks[idx])
+              .filter((pt): pt is Point => Boolean(pt));
+            if (extendWing && pts.length >= 2) {
+              const last = pts[pts.length - 1];
+              const secondLast = pts[pts.length - 2];
+              const corner = mappedLandmarks[cornerIdx] ?? last;
+              const dx = last.x - secondLast.x;
+              const dy = last.y - secondLast.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const wingLength = facialWidthPx * 0.05;
+              pts.push({
+                x: corner.x + (dx / len) * wingLength,
+                y: corner.y + (dy / len) * wingLength,
+              });
+            }
+            return pts;
+          };
+
+          const strokePath = (pts: Point[], widthPx: number) => {
+            if (pts.length < 2) return;
+            layerCtx.beginPath();
+            pts.forEach((pt, i) => {
+              if (i === 0) layerCtx.moveTo(pt.x, pt.y);
+              else layerCtx.lineTo(pt.x, pt.y);
+            });
+            layerCtx.lineWidth = widthPx;
+            layerCtx.strokeStyle = "white";
+            layerCtx.lineJoin = "round";
+            layerCtx.lineCap = "round";
+            layerCtx.stroke();
+          };
+
+          (["left", "right"] as const).forEach((side) => {
+            const isWinged = eyelinerTechnique === "winged";
+            const upperPts = buildLinePts(UPPER_LASH_LINE[side], isWinged, EYE_OUTER_CORNER[side]);
+            const linesToDraw = [upperPts];
+            if (eyelinerTechnique === "lash_enhancement") {
+              linesToDraw.push(buildLinePts(LOWER_LASH_LINE[side], false, EYE_OUTER_CORNER[side]));
+            }
+            const widthPx =
+              eyelinerTechnique === "lash_enhancement"
+                ? baseStrokeWidth * 0.7
+                : isWinged
+                  ? baseStrokeWidth * 1.3
+                  : baseStrokeWidth;
+
+            linesToDraw.forEach((pts) => {
+              layerCtx.save();
+              layerCtx.filter = `blur(${strokeBlurPx.toFixed(2)}px)`;
+              strokePath(pts, widthPx);
+              layerCtx.restore();
+
+              layerCtx.save();
+              layerCtx.filter = "none";
+              strokePath(pts, widthPx * 0.55);
+              layerCtx.restore();
+            });
+          });
         } else if (feat.includes("lip")) {
           const indices = FEATURE_INDICES[feat];
           if (indices && indices.length > 0) {
@@ -1030,7 +1408,27 @@ export default function VisualizerApp() {
             // Solid outer lip volume only — no inner oral cutouts or stroke outlines.
             // Natural landmark order is kept: the lip loops are already simple polygons and
             // angle-sorting them around the centroid would flatten the cupid's bow.
-            fillSolidCoreLandmarks(layerCtx, indices, lipBlur * 0.3 * dosageScale, lipBlur);
+            const inflatePx = lipBlur * 0.3 * dosageScale;
+            if (lipTechnique === "russian") {
+              // Russian technique needs headroom the plain lip outline doesn't give it: the
+              // upper lip is lifted toward the philtrum for vertical tenting, and the lower
+              // lip is narrowed off the commissures so volume reads as a centralized pout
+              // instead of corner-to-corner "sausage lip" inflation.
+              const basePts = getLandmarkPoints(indices, mappedLandmarks);
+              const { centroid } = getLandmarkMetrics(basePts);
+              const russianPts =
+                feat === "upper_lip"
+                  ? basePts.map((pt) =>
+                      pt.y < centroid.y ? { x: pt.x, y: pt.y - lipWidth * 0.15 } : pt
+                    )
+                  : basePts.map((pt) => ({
+                      x: centroid.x + (pt.x - centroid.x) * 0.85,
+                      y: pt.y,
+                    }));
+              fillSolidCorePolygon(layerCtx, russianPts, inflatePx, lipBlur);
+            } else {
+              fillSolidCoreLandmarks(layerCtx, indices, inflatePx, lipBlur);
+            }
           }
         } else {
           const indices = FEATURE_INDICES[feat];
@@ -1044,7 +1442,7 @@ export default function VisualizerApp() {
       });
       setMaskDataUrl(mainCanvas.toDataURL("image/png"));
     };
-  }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, jawlineTechnique, croppedImageSrc]);
+  }, [mappedLandmarks, selectedFeatures, browThickness, lipDosage, lipTechnique, noseTechnique, cheekTechnique, cheekDosage, chinTechnique, jawlineTechnique, lipPmuDensity, eyelinerTechnique, croppedImageSrc]);
 
   // Soft-composite AI over original using the same mask sent to fal (pixel-aligned).
   const applyEdgeFeathering = useCallback((originalSrc: string, aiResultUrl: string, maskUrl: string): Promise<string> => {
@@ -1202,6 +1600,8 @@ export default function VisualizerApp() {
       requested.push(DOSAGE_MAP[lipDosage]?.strength ?? 0.58);
       if (selectedFeatures.includes("upper_lip")) ceilings.push(PROCEDURE_STRENGTH_MAP.upper_lip);
       if (selectedFeatures.includes("lower_lip")) ceilings.push(PROCEDURE_STRENGTH_MAP.lower_lip);
+      const lipTechniqueCeiling = LIP_TECHNIQUE_STRENGTH_CEILING[lipTechnique];
+      if (lipTechniqueCeiling !== undefined) ceilings.push(lipTechniqueCeiling);
     }
     if (selectedFeatures.includes("nose")) {
       requested.push(NOSE_TECHNIQUES[noseTechnique].strength);
@@ -1215,6 +1615,14 @@ export default function VisualizerApp() {
       requested.push(lowerFaceCeiling);
       ceilings.push(lowerFaceCeiling);
     }
+    if (selectedFeatures.includes("lip_pmu")) {
+      requested.push(DOSAGE_MAP[lipPmuDensity]?.strength ?? 0.60);
+      ceilings.push(LIP_PMU_MAX_STRENGTH);
+    }
+    if (selectedFeatures.includes("eyeliner")) {
+      requested.push(EYELINER_MAX_STRENGTH);
+      ceilings.push(EYELINER_MAX_STRENGTH);
+    }
 
     return { requested, ceilings };
   }, [
@@ -1223,8 +1631,10 @@ export default function VisualizerApp() {
     cheekDosage,
     browDensity,
     lipDosage,
+    lipTechnique,
     noseTechnique,
     jawlineTechnique,
+    lipPmuDensity,
   ]);
 
   // Live readout so the effect of each dosage/preset change is visible before running.
@@ -1293,9 +1703,16 @@ export default function VisualizerApp() {
         );
       }
       if (selectedFeatures.includes("jawline")) {
-        const calibrations =
-          JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+        const jawlineConfig = JAWLINE_TECHNIQUES[jawlineTechnique];
+        const calibrations = jawlineConfig?.calibrations ?? (["buccal"] as const);
         calibrations.forEach((key) => promptParts.push(FACIAL_CALIBRATION_CONFIG[key].prompt));
+        if (jawlineConfig?.promptSuffix) promptParts.push(jawlineConfig.promptSuffix);
+      }
+      if (selectedFeatures.includes("lip_pmu")) {
+        promptParts.push(LIP_PMU_TECHNIQUES[lipPmuTechnique].prompt_suffix);
+      }
+      if (selectedFeatures.includes("eyeliner")) {
+        promptParts.push(EYELINER_TECHNIQUES[eyelinerTechnique].prompt_suffix);
       }
 
       // Single global strength, resolved identically to the on-screen readout.
@@ -1335,6 +1752,9 @@ export default function VisualizerApp() {
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         activeNegatives.push("harsh lines around mouth");
+        if (lipTechnique === "russian") {
+          activeNegatives.push("sausage lips", "uniform corner-to-corner volume", "horizontal-only projection");
+        }
       }
       if (selectedFeatures.includes("jawline")) {
         activeNegatives.push(
@@ -1348,6 +1768,18 @@ export default function VisualizerApp() {
           "skin grain mismatch",
           "distorted mouth",
           "shifted lip corners"
+        );
+      }
+      if (selectedFeatures.includes("lip_pmu")) {
+        activeNegatives.push("lip shape change", "added lip volume", "swollen lips");
+      }
+      if (selectedFeatures.includes("eyeliner")) {
+        activeNegatives.push(
+          "smudged eyeliner",
+          "asymmetric eye shape",
+          "closed eye",
+          "altered eyelid shape",
+          "changed eye size"
         );
       }
       const scopedNegativePrompt = activeNegatives.join(", ");
@@ -1470,16 +1902,20 @@ export default function VisualizerApp() {
           <label className="block text-xs font-semibold text-amber-200 uppercase tracking-wider mb-2">
             1. Select Target Procedures
           </label>
-          <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-9 gap-2">
             {[
-              { id: "chin" as const, label: "Chin" },
-              { id: "cheeks" as const, label: "Cheeks" },
-              { id: "nose" as const, label: "Rhinoplasty" },
-              { id: "jawline" as const, label: "Jawline / Buccal" },
-              { id: "brows" as const, label: "Eyebrows" },
-              { id: "upper_lip" as const, label: "Upper Lip" },
-              { id: "lower_lip" as const, label: "Lower Lip" },
-            ].map((f) => {
+              { id: "chin" as const, label: "Chin", available: availableChinTechniques.length > 0 },
+              { id: "cheeks" as const, label: "Cheeks", available: availableCheekTechniques.length > 0 },
+              { id: "nose" as const, label: "Rhinoplasty", available: availableNoseTechniques.length > 0 },
+              { id: "jawline" as const, label: "Jawline / Buccal", available: availableJawlineTechniques.length > 0 },
+              { id: "brows" as const, label: "Eyebrows", available: availableBrowTechniques.length > 0 },
+              { id: "upper_lip" as const, label: "Upper Lip", available: availableLipTechniques.length > 0 },
+              { id: "lower_lip" as const, label: "Lower Lip", available: availableLipTechniques.length > 0 },
+              { id: "lip_pmu" as const, label: "Lip PMU", available: availableLipPmuTechniques.length > 0 },
+              { id: "eyeliner" as const, label: "Eyeliner", available: availableEyelinerTechniques.length > 0 },
+            ]
+              .filter((f) => f.available)
+              .map((f) => {
               const active = selectedFeatures.includes(f.id);
               return (
                 <button
@@ -1514,8 +1950,8 @@ export default function VisualizerApp() {
                 onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
-                {Object.entries(CHIN_TECHNIQUES).map(([key, item]) => (
-                  <option key={key} value={key}>{item.name}</option>
+                {availableChinTechniques.map((key) => (
+                  <option key={key} value={key}>{CHIN_TECHNIQUES[key].name}</option>
                 ))}
               </select>
             </div>
@@ -1529,8 +1965,8 @@ export default function VisualizerApp() {
                 onChange={(e) => setJawlineTechnique(e.target.value as keyof typeof JAWLINE_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
-                {Object.entries(JAWLINE_TECHNIQUES).map(([key, item]) => (
-                  <option key={key} value={key}>{item.name}</option>
+                {availableJawlineTechniques.map((key) => (
+                  <option key={key} value={key}>{JAWLINE_TECHNIQUES[key].name}</option>
                 ))}
               </select>
             </div>
@@ -1545,8 +1981,8 @@ export default function VisualizerApp() {
                   onChange={(e) => setCheekTechnique(e.target.value as keyof typeof CHEEK_TECHNIQUES)}
                   className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs flex-1 font-medium"
                 >
-                  {Object.entries(CHEEK_TECHNIQUES).map(([key, item]) => (
-                    <option key={key} value={key}>{item.name}</option>
+                  {availableCheekTechniques.map((key) => (
+                    <option key={key} value={key}>{CHEEK_TECHNIQUES[key].name}</option>
                   ))}
                 </select>
                 <select
@@ -1570,8 +2006,8 @@ export default function VisualizerApp() {
                 onChange={(e) => setNoseTechnique(e.target.value as keyof typeof NOSE_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
-                {Object.entries(NOSE_TECHNIQUES).map(([key, item]) => (
-                  <option key={key} value={key}>{item.name}</option>
+                {availableNoseTechniques.map((key) => (
+                  <option key={key} value={key}>{NOSE_TECHNIQUES[key].name}</option>
                 ))}
               </select>
             </div>
@@ -1586,9 +2022,9 @@ export default function VisualizerApp() {
                   onChange={(e) => setBrowTechnique(e.target.value as keyof typeof BROW_TECHNIQUES)}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
                 >
-                  <option value="ombre_powder">Ombré Powder</option>
-                  <option value="microblading">Microblading</option>
-                  <option value="hybrid_tint">Hybrid Tint</option>
+                  {availableBrowTechniques.map((key) => (
+                    <option key={key} value={key}>{BROW_TECHNIQUES[key].name}</option>
+                  ))}
                 </select>
                 <select
                   value={browThickness}
@@ -1612,8 +2048,9 @@ export default function VisualizerApp() {
                   onChange={(e) => setLipTechnique(e.target.value as keyof typeof LIP_TECHNIQUES)}
                   className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs flex-1"
                 >
-                  <option value="russian">Russian Lift</option>
-                  <option value="classic_lip">Classic 3D</option>
+                  {availableLipTechniques.map((key) => (
+                    <option key={key} value={key}>{LIP_TECHNIQUES[key].name}</option>
+                  ))}
                 </select>
                 <select
                   value={lipDosage}
@@ -1626,6 +2063,36 @@ export default function VisualizerApp() {
                   <option value="1.00ml">1.00ml</option>
                 </select>
               </div>
+            </div>
+          )}
+
+          {selectedFeatures.includes("lip_pmu") && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Lip PMU Technique</label>
+              <select
+                value={lipPmuTechnique}
+                onChange={(e) => setLipPmuTechnique(e.target.value as keyof typeof LIP_PMU_TECHNIQUES)}
+                className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-full"
+              >
+                {availableLipPmuTechniques.map((key) => (
+                  <option key={key} value={key}>{LIP_PMU_TECHNIQUES[key].name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {selectedFeatures.includes("eyeliner") && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Eyeliner Technique</label>
+              <select
+                value={eyelinerTechnique}
+                onChange={(e) => setEyelinerTechnique(e.target.value as keyof typeof EYELINER_TECHNIQUES)}
+                className="bg-gray-800 text-white p-2 rounded border border-gray-700 text-xs w-full"
+              >
+                {availableEyelinerTechniques.map((key) => (
+                  <option key={key} value={key}>{EYELINER_TECHNIQUES[key].name}</option>
+                ))}
+              </select>
             </div>
           )}
         </div>
