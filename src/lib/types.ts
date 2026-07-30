@@ -60,7 +60,7 @@ export const PROCEDURE_CATALOG: ProcedureCatalogEntry[] = [
     label: "Rhinoplasty (Nose Reshaping)",
     description: "Simulate changes to the bridge, tip, and nostrils.",
     simulated: true,
-    feature: "nose",
+    feature: "nose_surgical",
     technique: "straight_slim",
   },
   {
@@ -69,7 +69,7 @@ export const PROCEDURE_CATALOG: ProcedureCatalogEntry[] = [
     label: "Mentoplasty (Chin Augmentation/Reduction)",
     description: "Simulate implants or bone shaving to balance the side profile.",
     simulated: true,
-    feature: "chin",
+    feature: "chin_surgical",
     technique: "anterior_projection",
   },
   {
@@ -78,7 +78,7 @@ export const PROCEDURE_CATALOG: ProcedureCatalogEntry[] = [
     label: "Bichectomy (Buccal Fat Removal)",
     description: "Simulate a more contoured, slimmer cheek and jawline.",
     simulated: true,
-    feature: "jawline",
+    feature: "jawline_surgical",
     technique: "buccal_fat_removal",
   },
   {
@@ -144,7 +144,7 @@ export const PROCEDURE_CATALOG: ProcedureCatalogEntry[] = [
     label: "Liquid Rhinoplasty",
     description: "Non-surgical nose job using filler to smooth bumps.",
     simulated: true,
-    feature: "nose",
+    feature: "nose_injectable",
     technique: "liquid_rhino",
   },
   {
@@ -153,7 +153,7 @@ export const PROCEDURE_CATALOG: ProcedureCatalogEntry[] = [
     label: "Jawline Contouring",
     description: "Create a sharper, more defined jaw angle with filler.",
     simulated: true,
-    feature: "jawline",
+    feature: "jawline_injectable",
     technique: "jawline_slim",
   },
   {
@@ -162,7 +162,7 @@ export const PROCEDURE_CATALOG: ProcedureCatalogEntry[] = [
     label: "Chin Filler",
     description: "Elongate the face or project a weak chin, non-surgically.",
     simulated: true,
-    feature: "chin",
+    feature: "chin_injectable",
     technique: "chin_filler",
   },
   {
@@ -171,7 +171,7 @@ export const PROCEDURE_CATALOG: ProcedureCatalogEntry[] = [
     label: "Masseter Reduction",
     description: "Slim the jawline and treat teeth grinding with neuromodulator.",
     simulated: true,
-    feature: "jawline",
+    feature: "jawline_injectable",
     technique: "masseter_reduction",
   },
   {
