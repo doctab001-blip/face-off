@@ -413,10 +413,19 @@ const FACIAL_CALIBRATION_CONFIG = {
       "sub-malar buccal fat pad volume reduction, natural lower cheek contouring, smooth facial taper, photorealistic, identical skin texture, exact skin tone, zero texture modification, same lighting",
   },
   jawline: {
-    maxStrength: 0.76,
-    blurMultiplier: 0.070, // 7.0% for soft mandibular angle blending
+    // Lowered from 0.76 after V-Line slimming produced smeared, hallucinated edges where the
+    // narrowed jaw meets the background. 0.76 was tuned for skin-only regions (see comment
+    // above), but this mask also covers real background pixels the model must repaint, and at
+    // 0.76 it discarded too much of that background detail before it had reconstructed it.
+    // Still well above the old 0.42/0.38 baseline that caused near-identical results, so this
+    // should not reintroduce that problem.
+    maxStrength: 0.66,
+    // Widened from 7.0% so the mandibular stroke's soft halo reaches further into the
+    // background beyond the jaw, giving the model more repainted room to blend into instead of
+    // stopping right at the old anatomical edge.
+    blurMultiplier: 0.095,
     prompt:
-      "refined mandibular angle contour, subtle V-line lower face slimming, smooth jawline definition, photorealistic, identical skin texture, exact skin tone, zero texturing artifacts, same lighting",
+      "refined mandibular angle contour, subtle V-line lower face slimming, smooth jawline definition, photorealistic, identical skin texture, exact skin tone, zero texturing artifacts, same lighting, seamlessly reconstruct and extend the original background texture, color and pattern into any area behind the new jawline, no smearing, no distortion of background elements, clean natural edge",
   },
 } as const;
 
