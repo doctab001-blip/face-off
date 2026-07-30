@@ -1126,10 +1126,54 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
       layerCanvas.height = img.height;
       const layerCtx = layerCanvas.getContext("2d");
 
+      // Per-feature strength: each procedure has its own effective intensity (dosage/technique
+      // strength clamped by that procedure's own safety ceiling). Previously a single global
+      // strength was sent to the AI, capped to the LOWEST ceiling among every selected
+      // procedure — so selecting PMU alongside anything else silently weakened everything.
+      // Instead, the strongest requested feature sets the AI's generation strength, and every
+      // other feature's mask region is painted at a proportionally dimmer alpha, so the
+      // client-side feathering blend pulls weaker procedures back toward the original by
+      // exactly the right amount instead of flattening all of them together.
+      const getFeatureStrength = (feat: FeatureType): number => {
+        switch (feat) {
+          case "chin":
+            return CHIN_TECHNIQUES[chinTechnique].strength;
+          case "cheeks": {
+            const cfg = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+            return Math.min(cfg.strength, PROCEDURE_STRENGTH_MAP.cheeks);
+          }
+          case "brows":
+            return DOSAGE_MAP[browDensity]?.strength || 0.70;
+          case "upper_lip":
+          case "lower_lip": {
+            const base = DOSAGE_MAP[lipDosage]?.strength ?? 0.58;
+            const techCeiling = LIP_TECHNIQUE_STRENGTH_CEILING[lipTechnique];
+            return Math.min(base, PROCEDURE_STRENGTH_MAP[feat], techCeiling ?? base);
+          }
+          case "nose":
+            return NOSE_TECHNIQUES[noseTechnique].strength;
+          case "jawline": {
+            const calibrations = JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+            return Math.max(...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength));
+          }
+          case "lip_pmu": {
+            const base = DOSAGE_MAP[lipPmuDensity]?.strength ?? 0.60;
+            return Math.min(base, LIP_PMU_MAX_STRENGTH);
+          }
+          case "eyeliner":
+            return EYELINER_MAX_STRENGTH;
+          default:
+            return DEFAULT_STRENGTH;
+        }
+      };
+      const peakFeatureStrength = Math.max(...selectedFeatures.map(getFeatureStrength));
+
       selectedFeatures.forEach((feat) => {
         if (!layerCtx) return;
         layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
         layerCtx.save();
+        layerCtx.globalAlpha =
+          peakFeatureStrength > 0 ? Math.min(1, getFeatureStrength(feat) / peakFeatureStrength) : 1;
 
         if (feat === "brows") {
           const leftBrow = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
@@ -1578,70 +1622,53 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
   const USER_SIMULATION_TIMEOUT_ERROR =
     `Simulation timed out after ${SIMULATION_TIMEOUT_MS / 1000} seconds — please try again.`;
 
-  // Collect the requested strengths and ceilings for the current selection. Shared by the
-  // on-screen intensity readout and by the request itself, so what is displayed is exactly
-  // what is sent.
-  const buildStrengthInputs = useCallback(() => {
-    const requested: number[] = [];
-    const ceilings: number[] = [];
+  // Per-feature strength: each procedure has its own effective intensity (dosage/technique
+  // strength clamped by that procedure's own safety ceiling), matching the mask-alpha scaling
+  // in the mask-compositing effect above. The AI's single `strength` input is set to the
+  // strongest requested feature; every other selected feature is pulled back toward the
+  // original in the mask itself, not by dragging this number down for everyone.
+  const getFeatureStrength = useCallback(
+    (feat: FeatureType): number => {
+      switch (feat) {
+        case "chin":
+          return CHIN_TECHNIQUES[chinTechnique].strength;
+        case "cheeks": {
+          const cfg = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
+          return Math.min(cfg.strength, PROCEDURE_STRENGTH_MAP.cheeks);
+        }
+        case "brows":
+          return DOSAGE_MAP[browDensity]?.strength || 0.70;
+        case "upper_lip":
+        case "lower_lip": {
+          const base = DOSAGE_MAP[lipDosage]?.strength ?? 0.58;
+          const techCeiling = LIP_TECHNIQUE_STRENGTH_CEILING[lipTechnique];
+          return Math.min(base, PROCEDURE_STRENGTH_MAP[feat], techCeiling ?? base);
+        }
+        case "nose":
+          return NOSE_TECHNIQUES[noseTechnique].strength;
+        case "jawline": {
+          const calibrations = JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+          return Math.max(...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength));
+        }
+        case "lip_pmu": {
+          const base = DOSAGE_MAP[lipPmuDensity]?.strength ?? 0.60;
+          return Math.min(base, LIP_PMU_MAX_STRENGTH);
+        }
+        case "eyeliner":
+          return EYELINER_MAX_STRENGTH;
+        default:
+          return DEFAULT_STRENGTH;
+      }
+    },
+    [chinTechnique, cheekDosage, browDensity, lipDosage, lipTechnique, noseTechnique, jawlineTechnique, lipPmuDensity]
+  );
 
-    if (selectedFeatures.includes("chin")) {
-      requested.push(CHIN_TECHNIQUES[chinTechnique].strength);
-    }
-    if (selectedFeatures.includes("cheeks")) {
-      const cheekDosageConfig = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
-      requested.push(cheekDosageConfig.strength);
-      ceilings.push(PROCEDURE_STRENGTH_MAP.cheeks);
-    }
-    if (selectedFeatures.includes("brows")) {
-      requested.push(DOSAGE_MAP[browDensity]?.strength || 0.70);
-    }
-    if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
-      requested.push(DOSAGE_MAP[lipDosage]?.strength ?? 0.58);
-      if (selectedFeatures.includes("upper_lip")) ceilings.push(PROCEDURE_STRENGTH_MAP.upper_lip);
-      if (selectedFeatures.includes("lower_lip")) ceilings.push(PROCEDURE_STRENGTH_MAP.lower_lip);
-      const lipTechniqueCeiling = LIP_TECHNIQUE_STRENGTH_CEILING[lipTechnique];
-      if (lipTechniqueCeiling !== undefined) ceilings.push(lipTechniqueCeiling);
-    }
-    if (selectedFeatures.includes("nose")) {
-      requested.push(NOSE_TECHNIQUES[noseTechnique].strength);
-    }
-    if (selectedFeatures.includes("jawline")) {
-      const calibrations =
-        JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
-      const lowerFaceCeiling = Math.max(
-        ...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength)
-      );
-      requested.push(lowerFaceCeiling);
-      ceilings.push(lowerFaceCeiling);
-    }
-    if (selectedFeatures.includes("lip_pmu")) {
-      requested.push(DOSAGE_MAP[lipPmuDensity]?.strength ?? 0.60);
-      ceilings.push(LIP_PMU_MAX_STRENGTH);
-    }
-    if (selectedFeatures.includes("eyeliner")) {
-      requested.push(EYELINER_MAX_STRENGTH);
-      ceilings.push(EYELINER_MAX_STRENGTH);
-    }
-
-    return { requested, ceilings };
-  }, [
-    selectedFeatures,
-    chinTechnique,
-    cheekDosage,
-    browDensity,
-    lipDosage,
-    lipTechnique,
-    noseTechnique,
-    jawlineTechnique,
-    lipPmuDensity,
-  ]);
-
-  // Live readout so the effect of each dosage/preset change is visible before running.
+  // Live readout so the effect of each dosage/preset change is visible before running. This is
+  // the strongest requested feature's strength — the same value sent to the AI as `strength`.
   const previewStrength = useMemo(() => {
-    const { requested, ceilings } = buildStrengthInputs();
-    return resolveStrength(requested, ceilings);
-  }, [buildStrengthInputs]);
+    if (selectedFeatures.length === 0) return DEFAULT_STRENGTH;
+    return Math.max(...selectedFeatures.map(getFeatureStrength));
+  }, [selectedFeatures, getFeatureStrength]);
 
   const handleGeneratePreview = async () => {
     // A second click while a request is in flight would race the first and leave
@@ -1715,12 +1742,12 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
         promptParts.push(EYELINER_TECHNIQUES[eyelinerTechnique].prompt_suffix);
       }
 
-      // Single global strength, resolved identically to the on-screen readout.
-      const { requested, ceilings } = buildStrengthInputs();
-      const maxStrength = resolveStrength(requested, ceilings);
+      // Single global strength sent to the AI — the strongest requested feature. Weaker
+      // features (e.g. PMU) are pulled back toward the original via their own mask alpha
+      // instead of capping this number for every selected procedure.
+      const maxStrength = previewStrength;
       console.info("Simulation strength resolved:", {
-        requested,
-        ceilings,
+        perFeature: selectedFeatures.map((f) => ({ feature: f, strength: getFeatureStrength(f) })),
         sent: maxStrength,
         features: selectedFeatures,
       });
