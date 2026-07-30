@@ -669,13 +669,16 @@ const EYELINER_TECHNIQUES = {
 };
 
 type FeatureType =
-  | "chin"
+  | "chin_surgical"
+  | "chin_injectable"
   | "cheeks"
-  | "nose"
+  | "nose_surgical"
+  | "nose_injectable"
   | "brows"
   | "upper_lip"
   | "lower_lip"
-  | "jawline"
+  | "jawline_surgical"
+  | "jawline_injectable"
   | "lip_pmu"
   | "eyeliner";
 
@@ -725,10 +728,13 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
   const [lipTechnique, setLipTechnique] = useState<keyof typeof LIP_TECHNIQUES>("russian");
   const [lipDosage, setLipDosage] = useState<string>("0.50ml");
   const [noseTechnique, setNoseTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("straight_slim");
+  const [noseInjectableTechnique] = useState<keyof typeof NOSE_TECHNIQUES>("liquid_rhino");
   const [cheekTechnique, setCheekTechnique] = useState<keyof typeof CHEEK_TECHNIQUES>("malar_volume");
   const [cheekDosage, setCheekDosage] = useState<string>("1.00ml");
   const [chinTechnique, setChinTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("anterior_projection");
+  const [chinInjectableTechnique] = useState<keyof typeof CHIN_TECHNIQUES>("chin_filler");
   const [jawlineTechnique, setJawlineTechnique] = useState<keyof typeof JAWLINE_TECHNIQUES>("combined_contour");
+  const [jawlineInjectableTechnique, setJawlineInjectableTechnique] = useState<keyof typeof JAWLINE_TECHNIQUES>("jawline_slim");
   const [lipPmuTechnique, setLipPmuTechnique] = useState<keyof typeof LIP_PMU_TECHNIQUES>("lip_blushing");
   const [lipPmuDensity] = useState<string>("tint_medium");
   const [eyelinerTechnique, setEyelinerTechnique] = useState<keyof typeof EYELINER_TECHNIQUES>("classic");
@@ -826,10 +832,20 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
     return keys.filter((key) => unlockedSet.has(`upper_lip:${key}`));
   }, [unlockedSet]);
 
-  const availableChinTechniques = useMemo(() => {
-    const keys = Object.keys(CHIN_TECHNIQUES) as Array<keyof typeof CHIN_TECHNIQUES>;
+  const availableChinSurgicalTechniques = useMemo(() => {
+    const keys = (Object.keys(CHIN_TECHNIQUES) as Array<keyof typeof CHIN_TECHNIQUES>).filter(
+      (key) => CHIN_TECHNIQUES[key].category === "plastic_surgery"
+    );
     if (!unlockedSet) return keys;
-    return keys.filter((key) => unlockedSet.has(`chin:${key}`));
+    return keys.filter((key) => unlockedSet.has(`chin_surgical:${key}`));
+  }, [unlockedSet]);
+
+  const availableChinInjectableTechniques = useMemo(() => {
+    const keys = (Object.keys(CHIN_TECHNIQUES) as Array<keyof typeof CHIN_TECHNIQUES>).filter(
+      (key) => CHIN_TECHNIQUES[key].category === "injectables"
+    );
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`chin_injectable:${key}`));
   }, [unlockedSet]);
 
   const availableCheekTechniques = useMemo(() => {
@@ -838,10 +854,20 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
     return keys.filter((key) => unlockedSet.has(`cheeks:${key}`));
   }, [unlockedSet]);
 
-  const availableNoseTechniques = useMemo(() => {
-    const keys = Object.keys(NOSE_TECHNIQUES) as Array<keyof typeof NOSE_TECHNIQUES>;
+  const availableNoseSurgicalTechniques = useMemo(() => {
+    const keys = (Object.keys(NOSE_TECHNIQUES) as Array<keyof typeof NOSE_TECHNIQUES>).filter(
+      (key) => NOSE_TECHNIQUES[key].category === "plastic_surgery"
+    );
     if (!unlockedSet) return keys;
-    return keys.filter((key) => unlockedSet.has(`nose:${key}`));
+    return keys.filter((key) => unlockedSet.has(`nose_surgical:${key}`));
+  }, [unlockedSet]);
+
+  const availableNoseInjectableTechniques = useMemo(() => {
+    const keys = (Object.keys(NOSE_TECHNIQUES) as Array<keyof typeof NOSE_TECHNIQUES>).filter(
+      (key) => NOSE_TECHNIQUES[key].category === "injectables"
+    );
+    if (!unlockedSet) return keys;
+    return keys.filter((key) => unlockedSet.has(`nose_injectable:${key}`));
   }, [unlockedSet]);
 
   const availableBrowTechniques = useMemo(() => {
@@ -865,17 +891,25 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
   // Jawline splits into single-calibration techniques (gated normally) plus the
   // combined_contour preset, which only makes sense once buccal_fat_removal AND at least
   // one of jawline_slim/masseter_reduction are both unlocked.
-  const availableJawlineTechniques = useMemo((): Array<keyof typeof JAWLINE_TECHNIQUES> => {
-    const singleKeys = (
-      ["buccal_fat_removal", "jawline_slim", "masseter_reduction"] as const
-    ).filter((key) => !unlockedSet || unlockedSet.has(`jawline:${key}`));
+  const availableJawlineSurgicalTechniques = useMemo((): Array<keyof typeof JAWLINE_TECHNIQUES> => {
+    const buccalUnlocked = !unlockedSet || unlockedSet.has("jawline_surgical:buccal_fat_removal");
+    const keys: Array<keyof typeof JAWLINE_TECHNIQUES> = buccalUnlocked ? ["buccal_fat_removal"] : [];
+    // combined_contour draws both the buccal reduction and the mandibular stroke, so it only
+    // makes sense once buccal_fat_removal (surgical) AND at least one injectable jawline
+    // technique are unlocked -- it spans both modality buckets by design.
     const comboUnlocked =
       !unlockedSet ||
-      (unlockedSet.has("jawline:buccal_fat_removal") &&
-        (unlockedSet.has("jawline:jawline_slim") || unlockedSet.has("jawline:masseter_reduction")));
-    const keys: Array<keyof typeof JAWLINE_TECHNIQUES> = [...singleKeys];
+      (unlockedSet.has("jawline_surgical:buccal_fat_removal") &&
+        (unlockedSet.has("jawline_injectable:jawline_slim") ||
+          unlockedSet.has("jawline_injectable:masseter_reduction")));
     if (comboUnlocked) keys.push("combined_contour");
     return keys;
+  }, [unlockedSet]);
+
+  const availableJawlineInjectableTechniques = useMemo((): Array<keyof typeof JAWLINE_TECHNIQUES> => {
+    return (["jawline_slim", "masseter_reduction"] as const).filter(
+      (key) => !unlockedSet || unlockedSet.has(`jawline_injectable:${key}`)
+    );
   }, [unlockedSet]);
 
   // If the facility bundle changes underneath the current selection, drop any now-locked
@@ -883,10 +917,13 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
   useEffect(() => {
     setSelectedFeatures((prev) => {
       const availability: Partial<Record<FeatureType, unknown[]>> = {
-        chin: availableChinTechniques,
+        chin_surgical: availableChinSurgicalTechniques,
+        chin_injectable: availableChinInjectableTechniques,
         cheeks: availableCheekTechniques,
-        nose: availableNoseTechniques,
-        jawline: availableJawlineTechniques,
+        nose_surgical: availableNoseSurgicalTechniques,
+        nose_injectable: availableNoseInjectableTechniques,
+        jawline_surgical: availableJawlineSurgicalTechniques,
+        jawline_injectable: availableJawlineInjectableTechniques,
         brows: availableBrowTechniques,
         upper_lip: availableLipTechniques,
         lower_lip: availableLipTechniques,
@@ -900,10 +937,13 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
       // unlocked, in the same order the toggle buttons are displayed, rather than silently
       // keeping a now-locked feature selected with no visible way to deselect it.
       const priorityOrder: FeatureType[] = [
-        "chin",
+        "chin_surgical",
+        "chin_injectable",
         "cheeks",
-        "nose",
-        "jawline",
+        "nose_surgical",
+        "nose_injectable",
+        "jawline_surgical",
+        "jawline_injectable",
         "brows",
         "upper_lip",
         "lower_lip",
@@ -914,17 +954,20 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
       return fallback ? [fallback] : prev;
     });
 
-    if (!availableChinTechniques.includes(chinTechnique)) {
-      setChinTechnique(availableChinTechniques[0] ?? chinTechnique);
+    if (!availableChinSurgicalTechniques.includes(chinTechnique)) {
+      setChinTechnique(availableChinSurgicalTechniques[0] ?? chinTechnique);
     }
     if (!availableCheekTechniques.includes(cheekTechnique)) {
       setCheekTechnique(availableCheekTechniques[0] ?? cheekTechnique);
     }
-    if (!availableNoseTechniques.includes(noseTechnique)) {
-      setNoseTechnique(availableNoseTechniques[0] ?? noseTechnique);
+    if (!availableNoseSurgicalTechniques.includes(noseTechnique)) {
+      setNoseTechnique(availableNoseSurgicalTechniques[0] ?? noseTechnique);
     }
-    if (!availableJawlineTechniques.includes(jawlineTechnique)) {
-      setJawlineTechnique(availableJawlineTechniques[0] ?? jawlineTechnique);
+    if (!availableJawlineSurgicalTechniques.includes(jawlineTechnique)) {
+      setJawlineTechnique(availableJawlineSurgicalTechniques[0] ?? jawlineTechnique);
+    }
+    if (!availableJawlineInjectableTechniques.includes(jawlineInjectableTechnique)) {
+      setJawlineInjectableTechnique(availableJawlineInjectableTechniques[0] ?? jawlineInjectableTechnique);
     }
     if (!availableBrowTechniques.includes(browTechnique)) {
       setBrowTechnique(availableBrowTechniques[0] ?? browTechnique);
@@ -1150,8 +1193,10 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
       // exactly the right amount instead of flattening all of them together.
       const getFeatureStrength = (feat: FeatureType): number => {
         switch (feat) {
-          case "chin":
+          case "chin_surgical":
             return CHIN_TECHNIQUES[chinTechnique].strength;
+          case "chin_injectable":
+            return CHIN_TECHNIQUES[chinInjectableTechnique].strength;
           case "cheeks": {
             const cfg = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
             return Math.min(cfg.strength, PROCEDURE_STRENGTH_MAP.cheeks);
@@ -1164,10 +1209,17 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
             const techCeiling = LIP_TECHNIQUE_STRENGTH_CEILING[lipTechnique];
             return Math.min(base, PROCEDURE_STRENGTH_MAP[feat], techCeiling ?? base);
           }
-          case "nose":
+          case "nose_surgical":
             return NOSE_TECHNIQUES[noseTechnique].strength;
-          case "jawline": {
+          case "nose_injectable":
+            return NOSE_TECHNIQUES[noseInjectableTechnique].strength;
+          case "jawline_surgical": {
             const calibrations = JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+            return Math.max(...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength));
+          }
+          case "jawline_injectable": {
+            const calibrations =
+              JAWLINE_TECHNIQUES[jawlineInjectableTechnique]?.calibrations ?? (["jawline"] as const);
             return Math.max(...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength));
           }
           case "lip_pmu": {
@@ -1198,8 +1250,16 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           [leftBrow, rightBrow].forEach((browIndices) => {
             fillSolidCoreLandmarks(layerCtx, browIndices, dilationPx, browBlur);
           });
-        } else if (feat === "chin") {
+        } else if (feat === "chin_surgical") {
           const chinConfig = CHIN_TECHNIQUES[chinTechnique];
+          fillSolidCoreLandmarks(
+            layerCtx,
+            angleSortIndices(CHIN_LANDMARKS, mappedLandmarks),
+            8,
+            chinConfig.blurPx
+          );
+        } else if (feat === "chin_injectable") {
+          const chinConfig = CHIN_TECHNIQUES[chinInjectableTechnique];
           fillSolidCoreLandmarks(
             layerCtx,
             angleSortIndices(CHIN_LANDMARKS, mappedLandmarks),
@@ -1234,7 +1294,7 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
               }
             });
           }
-        } else if (feat === "nose" && noseTechnique === "liquid_rhino") {
+        } else if (feat === "nose_injectable") {
           // Liquid rhinoplasty is filler-only: volume is added to the dorsum/tip, and the
           // sidewalls must stay completely untouched so the model has no mask permission to
           // narrow the nose. This mask deliberately excludes every lateral sidewall landmark
@@ -1270,7 +1330,7 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
             fillSolidCorePolygon(layerCtx, tipRing, tipRadiusPx * 0.6, tipBlurPx);
           }
           layerCtx.restore();
-        } else if (feat === "nose") {
+        } else if (feat === "nose_surgical") {
           // Tip/alar-only techniques don't touch the bridge, so they get the smaller mask —
           // asking FLUX to redraw the whole dorsum for a "delicate" tip refinement diluted
           // the edit (or let the model reshape the untouched bridge instead).
@@ -1307,7 +1367,7 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           clipToNasalBase(layerCtx, mappedLandmarks, layerCanvas.width, layerCanvas.height);
           fillSolidCorePolygon(layerCtx, nosePts, nosePaddingPx, noseBlurPx);
           layerCtx.restore();
-        } else if (feat === "jawline") {
+        } else if (feat === "jawline_surgical") {
           // Facial width anchor (outer temple landmarks 234/454) instead of
           // nose-derived alarWidth — the buccal hollow and jaw span a much
           // wider, vertically distinct region than the nose, so scaling
@@ -1316,6 +1376,100 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
 
           const activeCalibrations =
             JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+          const drawBuccal = activeCalibrations.includes("buccal");
+          const drawMandibularStroke = activeCalibrations.includes("jawline");
+
+          // Perioral guard: everything below is clipped strictly inferior to the
+          // tragus-commissure line, so the lips and mouth corners are never inpainted.
+          const perioralMarginPx = facialWidth * 0.03;
+          layerCtx.save();
+          clipInferiorToCommissureLine(
+            layerCtx,
+            mappedLandmarks,
+            layerCanvas.width,
+            layerCanvas.height,
+            perioralMarginPx
+          );
+
+          if (drawBuccal) {
+            // Sub-malar triangle, calibrated to 5.5% of bizygomatic width.
+            const buccalPaddingPx = facialWidth * FACIAL_CALIBRATION_CONFIG.buccal.blurMultiplier;
+            const midlineX = computeFacialMidlineX(mappedLandmarks);
+            (
+              [
+                [BUCCAL_LANDMARKS.left, NASOLABIAL_LEFT],
+                [BUCCAL_LANDMARKS.right, NASOLABIAL_RIGHT],
+              ] as const
+            ).forEach(([buccalIndicesRaw, nasolabialIdx]) => {
+              const buccalIndices = angleSortIndices(buccalIndicesRaw, mappedLandmarks);
+              // Additionally keep each pad lateral to its own nasolabial fold.
+              layerCtx.save();
+              clipLateralToNasolabialFold(
+                layerCtx,
+                mappedLandmarks[nasolabialIdx],
+                midlineX,
+                layerCanvas.width,
+                layerCanvas.height
+              );
+              fillSolidCoreLandmarks(
+                layerCtx,
+                buccalIndices,
+                buccalPaddingPx * 0.4,
+                buccalPaddingPx * 0.7
+              );
+              layerCtx.restore();
+            });
+          }
+
+          if (drawMandibularStroke) {
+            // Thick, unclosed stroke along the true mandibular contour
+            // (234 -> 152 -> 454) rather than a filled internal polygon —
+            // it bleeds outward into the background and inward onto the
+            // lower cheek, giving FLUX room to redraw an actually narrower
+            // silhouette instead of only softening the existing edge.
+            const jawPts = JAWLINE_LANDMARKS
+              .map((idx) => mappedLandmarks[idx])
+              .filter((pt): pt is { x: number; y: number } => Boolean(pt));
+            if (jawPts.length > 1) {
+              const strokeWidthPx = facialWidth * 0.15;
+              const strokeBlurPx = facialWidth * FACIAL_CALIBRATION_CONFIG.jawline.blurMultiplier;
+
+              const strokeJawPath = (widthPx: number) => {
+                layerCtx.beginPath();
+                jawPts.forEach((pt, i) => {
+                  if (i === 0) layerCtx.moveTo(pt.x, pt.y);
+                  else layerCtx.lineTo(pt.x, pt.y);
+                });
+                layerCtx.lineWidth = widthPx;
+                layerCtx.strokeStyle = "white";
+                layerCtx.lineJoin = "round";
+                layerCtx.lineCap = "round";
+                layerCtx.stroke();
+              };
+
+              // Halo, then opaque core — same dual-pass rationale as the filled regions.
+              layerCtx.save();
+              layerCtx.filter = `blur(${strokeBlurPx.toFixed(2)}px)`;
+              strokeJawPath(strokeWidthPx);
+              layerCtx.restore();
+
+              layerCtx.save();
+              layerCtx.filter = "none";
+              strokeJawPath(strokeWidthPx * 0.55);
+              layerCtx.restore();
+            }
+          }
+
+          layerCtx.restore();
+        } else if (feat === "jawline_injectable") {
+          // Facial width anchor (outer temple landmarks 234/454) instead of
+          // nose-derived alarWidth — the buccal hollow and jaw span a much
+          // wider, vertically distinct region than the nose, so scaling
+          // their blur/padding off nasal width was an anatomical mismatch.
+          const facialWidth = facialWidthPx;
+
+          const activeCalibrations =
+            JAWLINE_TECHNIQUES[jawlineInjectableTechnique]?.calibrations ?? (["jawline"] as const);
           const drawBuccal = activeCalibrations.includes("buccal");
           const drawMandibularStroke = activeCalibrations.includes("jawline");
 
@@ -1680,8 +1834,10 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
   const getFeatureStrength = useCallback(
     (feat: FeatureType): number => {
       switch (feat) {
-        case "chin":
+        case "chin_surgical":
           return CHIN_TECHNIQUES[chinTechnique].strength;
+        case "chin_injectable":
+          return CHIN_TECHNIQUES[chinInjectableTechnique].strength;
         case "cheeks": {
           const cfg = CHEEK_DOSAGE_MAP[cheekDosage] || CHEEK_DOSAGE_MAP["1.00ml"];
           return Math.min(cfg.strength, PROCEDURE_STRENGTH_MAP.cheeks);
@@ -1694,10 +1850,17 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           const techCeiling = LIP_TECHNIQUE_STRENGTH_CEILING[lipTechnique];
           return Math.min(base, PROCEDURE_STRENGTH_MAP[feat], techCeiling ?? base);
         }
-        case "nose":
+        case "nose_surgical":
           return NOSE_TECHNIQUES[noseTechnique].strength;
-        case "jawline": {
+        case "nose_injectable":
+          return NOSE_TECHNIQUES[noseInjectableTechnique].strength;
+        case "jawline_surgical": {
           const calibrations = JAWLINE_TECHNIQUES[jawlineTechnique]?.calibrations ?? (["buccal"] as const);
+          return Math.max(...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength));
+        }
+        case "jawline_injectable": {
+          const calibrations =
+            JAWLINE_TECHNIQUES[jawlineInjectableTechnique]?.calibrations ?? (["jawline"] as const);
           return Math.max(...calibrations.map((key) => FACIAL_CALIBRATION_CONFIG[key].maxStrength));
         }
         case "lip_pmu": {
@@ -1710,7 +1873,19 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           return DEFAULT_STRENGTH;
       }
     },
-    [chinTechnique, cheekDosage, browDensity, lipDosage, lipTechnique, noseTechnique, jawlineTechnique, lipPmuDensity]
+    [
+      chinTechnique,
+      chinInjectableTechnique,
+      cheekDosage,
+      browDensity,
+      lipDosage,
+      lipTechnique,
+      noseTechnique,
+      noseInjectableTechnique,
+      jawlineTechnique,
+      jawlineInjectableTechnique,
+      lipPmuDensity,
+    ]
   );
 
   // Live readout so the effect of each dosage/preset change is visible before running. This is
@@ -1759,8 +1934,11 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
     try {
       const promptParts: string[] = ["Clinical aesthetic portrait transformation:"];
 
-      if (selectedFeatures.includes("chin")) {
+      if (selectedFeatures.includes("chin_surgical")) {
         promptParts.push(CHIN_TECHNIQUES[chinTechnique].prompt_suffix);
+      }
+      if (selectedFeatures.includes("chin_injectable")) {
+        promptParts.push(CHIN_TECHNIQUES[chinInjectableTechnique].prompt_suffix);
       }
       if (selectedFeatures.includes("cheeks")) {
         const cheekConfig = CHEEK_TECHNIQUES[cheekTechnique];
@@ -1773,21 +1951,27 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         promptParts.push(LIP_TECHNIQUES[lipTechnique].prompt_suffix);
       }
-      if (selectedFeatures.includes("nose")) {
+      if (selectedFeatures.includes("nose_surgical")) {
         promptParts.push(NOSE_TECHNIQUES[noseTechnique].prompt_suffix);
-        if (noseTechnique === "liquid_rhino") {
-          // The surgical instruction below explicitly invites the model to redraw the
-          // sidewalls, which is exactly what liquid rhinoplasty must not do.
-          promptParts.push("do not alter the nasal sidewalls or nostril width in any way");
-        } else {
-          promptParts.push(
-            "reshape the full nasal unit including bridge, dorsum, sidewalls, and tip with smooth continuous contours"
-          );
-        }
+        promptParts.push(
+          "reshape the full nasal unit including bridge, dorsum, sidewalls, and tip with smooth continuous contours"
+        );
       }
-      if (selectedFeatures.includes("jawline")) {
+      if (selectedFeatures.includes("nose_injectable")) {
+        promptParts.push(NOSE_TECHNIQUES[noseInjectableTechnique].prompt_suffix);
+        // The surgical instruction above explicitly invites the model to redraw the sidewalls,
+        // which is exactly what liquid rhinoplasty must not do.
+        promptParts.push("do not alter the nasal sidewalls or nostril width in any way");
+      }
+      if (selectedFeatures.includes("jawline_surgical")) {
         const jawlineConfig = JAWLINE_TECHNIQUES[jawlineTechnique];
         const calibrations = jawlineConfig?.calibrations ?? (["buccal"] as const);
+        calibrations.forEach((key) => promptParts.push(FACIAL_CALIBRATION_CONFIG[key].prompt));
+        if (jawlineConfig?.promptSuffix) promptParts.push(jawlineConfig.promptSuffix);
+      }
+      if (selectedFeatures.includes("jawline_injectable")) {
+        const jawlineConfig = JAWLINE_TECHNIQUES[jawlineInjectableTechnique];
+        const calibrations = jawlineConfig?.calibrations ?? (["jawline"] as const);
         calibrations.forEach((key) => promptParts.push(FACIAL_CALIBRATION_CONFIG[key].prompt));
         if (jawlineConfig?.promptSuffix) promptParts.push(jawlineConfig.promptSuffix);
       }
@@ -1821,7 +2005,7 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           "sunken under-eyes"
         );
       }
-      if (selectedFeatures.includes("nose")) {
+      if (selectedFeatures.includes("nose_surgical")) {
         // Without explicit length constraints the model regresses to aesthetic averages,
         // which bundle tip rotation and shortening into any rhinoplasty request.
         activeNegatives.push(
@@ -1832,14 +2016,14 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           "upturned nose",
           "altered nasal length"
         );
-        if (noseTechnique === "liquid_rhino") {
-          activeNegatives.push(
-            "narrowed sidewalls",
-            "reduced nasal width",
-            "surgical rhinoplasty result",
-            "bone or cartilage removal"
-          );
-        }
+      }
+      if (selectedFeatures.includes("nose_injectable")) {
+        activeNegatives.push(
+          "narrowed sidewalls",
+          "reduced nasal width",
+          "surgical rhinoplasty result",
+          "bone or cartilage removal"
+        );
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         activeNegatives.push("harsh lines around mouth");
@@ -1847,7 +2031,7 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           activeNegatives.push("sausage lips", "uniform corner-to-corner volume", "horizontal-only projection");
         }
       }
-      if (selectedFeatures.includes("jawline")) {
+      if (selectedFeatures.includes("jawline_surgical") || selectedFeatures.includes("jawline_injectable")) {
         activeNegatives.push(
           "asymmetric jaw contour",
           "over-hollowed cheeks",
@@ -1993,36 +2177,64 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           <label className="block text-xs font-semibold text-amber-200 uppercase tracking-wider mb-2">
             1. Select Target Procedures
           </label>
-          <div className="grid grid-cols-2 md:grid-cols-9 gap-2">
+          <div className="space-y-3">
             {[
-              { id: "chin" as const, label: "Chin", available: availableChinTechniques.length > 0 },
-              { id: "cheeks" as const, label: "Cheeks", available: availableCheekTechniques.length > 0 },
-              { id: "nose" as const, label: "Rhinoplasty", available: availableNoseTechniques.length > 0 },
-              { id: "jawline" as const, label: "Jawline / Buccal", available: availableJawlineTechniques.length > 0 },
-              { id: "brows" as const, label: "Eyebrows", available: availableBrowTechniques.length > 0 },
-              { id: "upper_lip" as const, label: "Upper Lip", available: availableLipTechniques.length > 0 },
-              { id: "lower_lip" as const, label: "Lower Lip", available: availableLipTechniques.length > 0 },
-              { id: "lip_pmu" as const, label: "Lip PMU", available: availableLipPmuTechniques.length > 0 },
-              { id: "eyeliner" as const, label: "Eyeliner", available: availableEyelinerTechniques.length > 0 },
+              {
+                category: "Surface & PMU (Pigmentation)",
+                items: [
+                  { id: "brows" as const, label: "Eyebrows (Microblading)", available: availableBrowTechniques.length > 0 },
+                  { id: "lip_pmu" as const, label: "Lip Blushing / PMU", available: availableLipPmuTechniques.length > 0 },
+                  { id: "eyeliner" as const, label: "Eyeliner", available: availableEyelinerTechniques.length > 0 },
+                ],
+              },
+              {
+                category: "Injectables (Volumization & Contouring)",
+                items: [
+                  { id: "upper_lip" as const, label: "Upper Lip", available: availableLipTechniques.length > 0 },
+                  { id: "lower_lip" as const, label: "Lower Lip", available: availableLipTechniques.length > 0 },
+                  { id: "cheeks" as const, label: "Cheek Contouring", available: availableCheekTechniques.length > 0 },
+                  { id: "chin_injectable" as const, label: "Chin Filler", available: availableChinInjectableTechniques.length > 0 },
+                  { id: "jawline_injectable" as const, label: "Jawline / Masseter Contour", available: availableJawlineInjectableTechniques.length > 0 },
+                  { id: "nose_injectable" as const, label: "Liquid Rhinoplasty", available: availableNoseInjectableTechniques.length > 0 },
+                ],
+              },
+              {
+                category: "Surgical & Structural (Reduction & Osteotomy)",
+                items: [
+                  { id: "nose_surgical" as const, label: "Surgical Rhinoplasty", available: availableNoseSurgicalTechniques.length > 0 },
+                  { id: "jawline_surgical" as const, label: "Buccal Fat / Jawline Slimming", available: availableJawlineSurgicalTechniques.length > 0 },
+                  { id: "chin_surgical" as const, label: "Chin Surgery", available: availableChinSurgicalTechniques.length > 0 },
+                ],
+              },
             ]
-              .filter((f) => f.available)
-              .map((f) => {
-              const active = selectedFeatures.includes(f.id);
-              return (
-                <button
-                  key={f.id}
-                  onClick={() => toggleFeature(f.id)}
-                  className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition ${
-                    active
-                      ? "bg-amber-600/20 border-amber-500 text-amber-200 font-bold"
-                      : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750"
-                  }`}
-                >
-                  <span>{f.label}</span>
-                  <span className="text-xs">{active ? "✓" : "+"}</span>
-                </button>
-              );
-            })}
+              .map((group) => ({ category: group.category, items: group.items.filter((f) => f.available) }))
+              .filter((group) => group.items.length > 0)
+              .map((group) => (
+                <div key={group.category}>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    {group.category}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {group.items.map((f) => {
+                      const active = selectedFeatures.includes(f.id);
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() => toggleFeature(f.id)}
+                          className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition ${
+                            active
+                              ? "bg-amber-600/20 border-amber-500 text-amber-200 font-bold"
+                              : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750"
+                          }`}
+                        >
+                          <span>{f.label}</span>
+                          <span className="text-xs">{active ? "✓" : "+"}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
 
@@ -2033,22 +2245,31 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
             <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm text-gray-300 w-full" />
           </div>
 
-          {selectedFeatures.includes("chin") && (
+          {selectedFeatures.includes("chin_surgical") && (
             <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Chin Procedure Preset</label>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Chin Surgery Preset</label>
               <select
                 value={chinTechnique}
                 onChange={(e) => setChinTechnique(e.target.value as keyof typeof CHIN_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
-                {availableChinTechniques.map((key) => (
+                {availableChinSurgicalTechniques.map((key) => (
                   <option key={key} value={key}>{CHIN_TECHNIQUES[key].name}</option>
                 ))}
               </select>
             </div>
           )}
 
-          {selectedFeatures.includes("jawline") && (
+          {selectedFeatures.includes("chin_injectable") && (
+            <div>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Chin Filler Preset</label>
+              <div className="bg-gray-800 text-gray-300 p-2 rounded border border-amber-500/50 text-xs w-full font-medium">
+                {CHIN_TECHNIQUES[chinInjectableTechnique].name}
+              </div>
+            </div>
+          )}
+
+          {selectedFeatures.includes("jawline_surgical") && (
             <div>
               <label className="block text-xs text-amber-300 font-medium mb-1">Jawline / Buccal Fat Preset</label>
               <select
@@ -2056,7 +2277,22 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
                 onChange={(e) => setJawlineTechnique(e.target.value as keyof typeof JAWLINE_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
-                {availableJawlineTechniques.map((key) => (
+                {availableJawlineSurgicalTechniques.map((key) => (
+                  <option key={key} value={key}>{JAWLINE_TECHNIQUES[key].name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {selectedFeatures.includes("jawline_injectable") && (
+            <div>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Jawline / Masseter Contour Preset</label>
+              <select
+                value={jawlineInjectableTechnique}
+                onChange={(e) => setJawlineInjectableTechnique(e.target.value as keyof typeof JAWLINE_TECHNIQUES)}
+                className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
+              >
+                {availableJawlineInjectableTechniques.map((key) => (
                   <option key={key} value={key}>{JAWLINE_TECHNIQUES[key].name}</option>
                 ))}
               </select>
@@ -2089,18 +2325,27 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
             </div>
           )}
 
-          {selectedFeatures.includes("nose") && (
+          {selectedFeatures.includes("nose_surgical") && (
             <div>
-              <label className="block text-xs text-amber-300 font-medium mb-1">Rhinoplasty Preset</label>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Surgical Rhinoplasty Preset</label>
               <select
                 value={noseTechnique}
                 onChange={(e) => setNoseTechnique(e.target.value as keyof typeof NOSE_TECHNIQUES)}
                 className="bg-gray-800 text-white p-2 rounded border border-amber-500/50 text-xs w-full font-medium"
               >
-                {availableNoseTechniques.map((key) => (
+                {availableNoseSurgicalTechniques.map((key) => (
                   <option key={key} value={key}>{NOSE_TECHNIQUES[key].name}</option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {selectedFeatures.includes("nose_injectable") && (
+            <div>
+              <label className="block text-xs text-amber-300 font-medium mb-1">Liquid Rhinoplasty Preset</label>
+              <div className="bg-gray-800 text-gray-300 p-2 rounded border border-amber-500/50 text-xs w-full font-medium">
+                {NOSE_TECHNIQUES[noseInjectableTechnique].name}
+              </div>
             </div>
           )}
 
