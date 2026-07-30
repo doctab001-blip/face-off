@@ -498,8 +498,13 @@ const NOSE_TECHNIQUES = {
   },
   liquid_rhino: {
     name: "Liquid Non-Surgical Rhinoplasty",
-    prompt_suffix: "non-surgical dermal filler alignment, disguised nasal bump, straight bridge profile, photorealistic",
-    strength: 0.58,
+    prompt_suffix:
+      "subtle dermal filler injection to the nasal dorsum, add volume to radix, elevate nasal tip, straighten dorsal line, maintain original nasal width, photorealistic medical simulation",
+    // Lowered from 0.58. This is filler volume added on top of the existing structure, not a
+    // reshape — combined with the narrow radix/tip-only mask below (no sidewall coverage at
+    // all), a lower denoise keeps the change readable as "added volume" instead of the model
+    // reinterpreting a wide mask as license to redraw the whole nose.
+    strength: 0.38,
     category: "injectables" as ServiceCategoryId,
   },
 };
@@ -1229,6 +1234,42 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
               }
             });
           }
+        } else if (feat === "nose" && noseTechnique === "liquid_rhino") {
+          // Liquid rhinoplasty is filler-only: volume is added to the dorsum/tip, and the
+          // sidewalls must stay completely untouched so the model has no mask permission to
+          // narrow the nose. This mask deliberately excludes every lateral sidewall landmark
+          // (98/327, 45/275, 220/440, 129/358, 209/429, 122/351, 131/360) that the wide
+          // dorsum+sidewall polygon below uses — it's just a narrow midline bridge strip plus
+          // a small round pad at the tip.
+          const bridgeChain = [168, 197, 195, 6, 5, 4]
+            .map((idx) => mappedLandmarks[idx])
+            .filter((pt): pt is Point => Boolean(pt));
+          const tipPt = mappedLandmarks[NOSE_TIP];
+          const leftAlarLR = mappedLandmarks[NOSE_ALAR_LEFT];
+          const rightAlarLR = mappedLandmarks[NOSE_ALAR_RIGHT];
+          const alarWidthLR =
+            leftAlarLR && rightAlarLR
+              ? Math.abs(rightAlarLR.x - leftAlarLR.x)
+              : img.width * 0.18;
+          // Strip width is a small fraction of inter-alar width, so even at full inflation it
+          // can never reach as far out as the actual sidewalls.
+          const bridgeStripPx = alarWidthLR * 0.12;
+          const bridgeBlurPx = Math.max(2, bridgeStripPx * 0.6);
+          layerCtx.save();
+          clipToNasalBase(layerCtx, mappedLandmarks, layerCanvas.width, layerCanvas.height);
+          if (bridgeChain.length >= 2) {
+            fillSolidCorePolygon(layerCtx, bridgeChain, bridgeStripPx, bridgeBlurPx);
+          }
+          if (tipPt) {
+            const tipRadiusPx = alarWidthLR * 0.18;
+            const tipBlurPx = Math.max(2, tipRadiusPx * 0.5);
+            const tipRing = [0, 60, 120, 180, 240, 300].map((deg) => ({
+              x: tipPt.x + Math.cos((deg * Math.PI) / 180) * (tipRadiusPx * 0.4),
+              y: tipPt.y + Math.sin((deg * Math.PI) / 180) * (tipRadiusPx * 0.4),
+            }));
+            fillSolidCorePolygon(layerCtx, tipRing, tipRadiusPx * 0.6, tipBlurPx);
+          }
+          layerCtx.restore();
         } else if (feat === "nose") {
           // Tip/alar-only techniques don't touch the bridge, so they get the smaller mask —
           // asking FLUX to redraw the whole dorsum for a "delicate" tip refinement diluted
@@ -1734,9 +1775,15 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
       }
       if (selectedFeatures.includes("nose")) {
         promptParts.push(NOSE_TECHNIQUES[noseTechnique].prompt_suffix);
-        promptParts.push(
-          "reshape the full nasal unit including bridge, dorsum, sidewalls, and tip with smooth continuous contours"
-        );
+        if (noseTechnique === "liquid_rhino") {
+          // The surgical instruction below explicitly invites the model to redraw the
+          // sidewalls, which is exactly what liquid rhinoplasty must not do.
+          promptParts.push("do not alter the nasal sidewalls or nostril width in any way");
+        } else {
+          promptParts.push(
+            "reshape the full nasal unit including bridge, dorsum, sidewalls, and tip with smooth continuous contours"
+          );
+        }
       }
       if (selectedFeatures.includes("jawline")) {
         const jawlineConfig = JAWLINE_TECHNIQUES[jawlineTechnique];
@@ -1785,6 +1832,14 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           "upturned nose",
           "altered nasal length"
         );
+        if (noseTechnique === "liquid_rhino") {
+          activeNegatives.push(
+            "narrowed sidewalls",
+            "reduced nasal width",
+            "surgical rhinoplasty result",
+            "bone or cartilage removal"
+          );
+        }
       }
       if (selectedFeatures.includes("upper_lip") || selectedFeatures.includes("lower_lip")) {
         activeNegatives.push("harsh lines around mouth");
