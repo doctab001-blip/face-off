@@ -239,6 +239,35 @@ function expandHorizontallyAboutMidline(pts: Point[], midlineX: number, factor: 
   return pts.map((pt) => ({ x: midlineX + (pt.x - midlineX) * factor, y: pt.y }));
 }
 
+// Force an ordered contour path (not a filled polygon) to be bilaterally symmetric about
+// X_mid, without disturbing point order — buildMidlineSymmetricPolygon can't be reused here
+// because it re-sorts points by angle around a centroid, which would scramble a stroke path.
+// JAWLINE_LANDMARKS is deliberately a mirrored left-to-right sequence (temple -> ... -> chin
+// -> ... -> temple), so index i and index (n-1-i) are the same anatomical point on opposite
+// sides. Averaging each pair's horizontal distance from X_mid and re-projecting both points
+// at that shared distance removes any left/right width mismatch a tilted source photo would
+// otherwise bake into the mask, while leaving each point's Y position untouched.
+function mirrorPathAboutMidline(pts: Point[], midlineX: number): Point[] {
+  const n = pts.length;
+  if (n < 2) return pts;
+  const result: Point[] = new Array(n);
+  for (let i = 0; i <= Math.floor((n - 1) / 2); i++) {
+    const j = n - 1 - i;
+    const a = pts[i];
+    const b = pts[j];
+    if (i === j) {
+      result[i] = { x: midlineX, y: a.y };
+      continue;
+    }
+    const avgOffset = (Math.abs(a.x - midlineX) + Math.abs(b.x - midlineX)) / 2;
+    const aSign = a.x >= midlineX ? 1 : -1;
+    const bSign = b.x >= midlineX ? 1 : -1;
+    result[i] = { x: midlineX + aSign * avgOffset, y: a.y };
+    result[j] = { x: midlineX + bSign * avgOffset, y: b.y };
+  }
+  return result;
+}
+
 // Outer temple landmarks — bizygomatic (facial) width reference.
 const FACE_LATERAL_LEFT = 234;
 const FACE_LATERAL_RIGHT = 454;
@@ -1379,6 +1408,12 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           const drawBuccal = activeCalibrations.includes("buccal");
           const drawMandibularStroke = activeCalibrations.includes("jawline");
 
+          // Shared symmetry axis for this feature — same rationale as the nasal mask: on a
+          // yawed/rolled head the raw jaw landmarks project unevenly, so anything built from
+          // them (buccal pads, mandibular stroke) inherits that lateral drift and reads as a
+          // one-sided edit. Computed once and reused by both sub-masks below.
+          const jawMidlineX = computeFacialMidlineX(mappedLandmarks);
+
           // Perioral guard: everything below is clipped strictly inferior to the
           // tragus-commissure line, so the lips and mouth corners are never inpainted.
           const perioralMarginPx = facialWidth * 0.03;
@@ -1394,7 +1429,6 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           if (drawBuccal) {
             // Sub-malar triangle, calibrated to 5.5% of bizygomatic width.
             const buccalPaddingPx = facialWidth * FACIAL_CALIBRATION_CONFIG.buccal.blurMultiplier;
-            const midlineX = computeFacialMidlineX(mappedLandmarks);
             (
               [
                 [BUCCAL_LANDMARKS.left, NASOLABIAL_LEFT],
@@ -1407,7 +1441,7 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
               clipLateralToNasolabialFold(
                 layerCtx,
                 mappedLandmarks[nasolabialIdx],
-                midlineX,
+                jawMidlineX,
                 layerCanvas.width,
                 layerCanvas.height
               );
@@ -1427,9 +1461,16 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
             // it bleeds outward into the background and inward onto the
             // lower cheek, giving FLUX room to redraw an actually narrower
             // silhouette instead of only softening the existing edge.
-            const jawPts = JAWLINE_LANDMARKS
+            const rawJawPts = JAWLINE_LANDMARKS
               .map((idx) => mappedLandmarks[idx])
               .filter((pt): pt is { x: number; y: number } => Boolean(pt));
+            // Force the stroke path itself to be bilaterally symmetric about jawMidlineX
+            // before drawing, independent of how the diffusion model renders it — this is
+            // the direct fix for one-sided "swelling" results on tilted source photos.
+            const jawPts =
+              jawMidlineX !== null && rawJawPts.length === JAWLINE_LANDMARKS.length
+                ? mirrorPathAboutMidline(rawJawPts, jawMidlineX)
+                : rawJawPts;
             if (jawPts.length > 1) {
               const strokeWidthPx = facialWidth * 0.15;
               const strokeBlurPx = facialWidth * FACIAL_CALIBRATION_CONFIG.jawline.blurMultiplier;
@@ -1473,6 +1514,12 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           const drawBuccal = activeCalibrations.includes("buccal");
           const drawMandibularStroke = activeCalibrations.includes("jawline");
 
+          // Shared symmetry axis for this feature — same rationale as the nasal mask: on a
+          // yawed/rolled head the raw jaw landmarks project unevenly, so anything built from
+          // them (buccal pads, mandibular stroke) inherits that lateral drift and reads as a
+          // one-sided edit. Computed once and reused by both sub-masks below.
+          const jawMidlineX = computeFacialMidlineX(mappedLandmarks);
+
           // Perioral guard: everything below is clipped strictly inferior to the
           // tragus-commissure line, so the lips and mouth corners are never inpainted.
           const perioralMarginPx = facialWidth * 0.03;
@@ -1488,7 +1535,6 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
           if (drawBuccal) {
             // Sub-malar triangle, calibrated to 5.5% of bizygomatic width.
             const buccalPaddingPx = facialWidth * FACIAL_CALIBRATION_CONFIG.buccal.blurMultiplier;
-            const midlineX = computeFacialMidlineX(mappedLandmarks);
             (
               [
                 [BUCCAL_LANDMARKS.left, NASOLABIAL_LEFT],
@@ -1501,7 +1547,7 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
               clipLateralToNasolabialFold(
                 layerCtx,
                 mappedLandmarks[nasolabialIdx],
-                midlineX,
+                jawMidlineX,
                 layerCanvas.width,
                 layerCanvas.height
               );
@@ -1521,9 +1567,16 @@ export default function VisualizerApp({ allowedProcedureIds = null }: Visualizer
             // it bleeds outward into the background and inward onto the
             // lower cheek, giving FLUX room to redraw an actually narrower
             // silhouette instead of only softening the existing edge.
-            const jawPts = JAWLINE_LANDMARKS
+            const rawJawPts = JAWLINE_LANDMARKS
               .map((idx) => mappedLandmarks[idx])
               .filter((pt): pt is { x: number; y: number } => Boolean(pt));
+            // Force the stroke path itself to be bilaterally symmetric about jawMidlineX
+            // before drawing, independent of how the diffusion model renders it — this is
+            // the direct fix for one-sided "swelling" results on tilted source photos.
+            const jawPts =
+              jawMidlineX !== null && rawJawPts.length === JAWLINE_LANDMARKS.length
+                ? mirrorPathAboutMidline(rawJawPts, jawMidlineX)
+                : rawJawPts;
             if (jawPts.length > 1) {
               const strokeWidthPx = facialWidth * 0.15;
               const strokeBlurPx = facialWidth * FACIAL_CALIBRATION_CONFIG.jawline.blurMultiplier;
